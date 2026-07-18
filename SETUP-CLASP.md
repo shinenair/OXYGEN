@@ -41,21 +41,23 @@ your browser, nothing to install:
    **Allow**, and copy the code Google shows you.
 4. Paste that code back into the terminal and press Enter.
    It should say *"Authorization successful"*.
-5. Now print the credentials file:
+5. Now print the credentials file, base64-encoded (one copy-safe block —
+   raw JSON gets corrupted by terminal line-wrapping when copied):
 
    ```
-   cat ~/.clasprc.json
+   base64 -w 0 ~/.clasprc.json ; echo
    ```
 
-6. Copy the ENTIRE output (from `{` to `}`).
+6. Copy the ENTIRE block of letters/digits it prints (it may wrap
+   across several lines on screen — that's fine, copy it all).
 
 ## Step 4 — Store the credentials as a GitHub secret
 
 1. On github.com, open the **OXYGEN** repo →
    **Settings → Secrets and variables → Actions**.
 2. Click **New repository secret**.
-3. Name: `CLASPRC_JSON`
-4. Secret: paste the whole `.clasprc.json` output from Step 3.
+3. Name: `CLASPRC_JSON_B64`
+4. Secret: paste the base64 block from Step 3.
 5. Click **Add secret**.
 
 ---

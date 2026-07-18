@@ -10,7 +10,8 @@ name: Deploy to Apps Script
 #
 # Requirements (one-time setup — see SETUP-CLASP.md):
 #   • .clasp.json in the repo root must contain the real Script ID
-#   • repository secret CLASPRC_JSON with the clasp login credentials
+#   • repository secret CLASPRC_JSON_B64: the clasp login credentials,
+#     base64-encoded (`base64 -w 0 ~/.clasprc.json`)
 
 on:
   push:
@@ -35,9 +36,14 @@ jobs:
         run: npm install -g @google/clasp
 
       - name: Restore clasp credentials
-        run: printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+        # The secret holds ~/.clasprc.json base64-encoded (produced with
+        # `base64 -w 0 ~/.clasprc.json`). Base64 survives copy-paste from
+        # a terminal — any line-breaks picked up along the way are
+        # ignored by the decoder, unlike raw JSON where a break inside a
+        # token corrupts the file.
+        run: printf '%s' "$CLASPRC_JSON_B64" | base64 -d > ~/.clasprc.json
         env:
-          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          CLASPRC_JSON_B64: ${{ secrets.CLASPRC_JSON_B64 }}
 
       - name: Push code to the Apps Script project
         run: clasp push -f
