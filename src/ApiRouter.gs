@@ -43,6 +43,32 @@ var ApiRouter = (function() {
     }
   }
 
+  // Profile photos render straight from Drive in the VIEWER's browser,
+  // so the file itself must be link-viewable. Photos uploaded through
+  // the app already are (uploadOwnerPhoto sets it), but photos added by
+  // pasting a private Drive link were visible only to the Administrator
+  // who owns the file. This repairs sharing on the records being served,
+  // so a unit's photos become viewable to everyone the first time its
+  // profile is opened. A cache entry keeps it to one Drive call per
+  // file per 6 hours; files the script's account can't modify (foreign
+  // links) are left untouched.
+  function _ensurePhotoSharing(records) {
+    var cache = CacheService.getScriptCache();
+    (records || []).forEach(function(r) {
+      var link = r && r.profile_picture;
+      if (!link || String(link).indexOf('drive.google') === -1) return;
+      var m = String(link).match(/[-\w]{25,}/);
+      if (!m) return;
+      var key = 'photoshare_' + m[0];
+      if (cache.get(key)) return;
+      try {
+        DriveApp.getFileById(m[0]).setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (e) { /* not this account's file — nothing we can do */ }
+      cache.put(key, '1', 21600);
+    });
+    return records;
+  }
+
   // Actions only Administrators may perform — enforced on the SERVER,
   // so hiding menus in the browser is cosmetic, not the security boundary.
   var ADMIN_ACTIONS = {
@@ -128,7 +154,7 @@ var ApiRouter = (function() {
       // Owners
       case 'owners.add':          return OwnersService.addOwner(data);
       case 'owners.getAll':       return OwnersService.getAllOwners();
-      case 'owners.getByUnit':    return OwnersService.getOwnersByUnit(data.unit_id);
+      case 'owners.getByUnit':    return _ensurePhotoSharing(OwnersService.getOwnersByUnit(data.unit_id));
       case 'owners.archive':      return OwnersService.archiveOwner(data.owner_id, data.archived_by);
       case 'owners.history':      return OwnersService.getOwnerHistory(data.unit_id);
       case 'owners.getById':      return OwnersService.getOwnerById(data.owner_id);
@@ -139,7 +165,7 @@ var ApiRouter = (function() {
       // Tenants
       case 'tenants.add':         return TenantsService.addTenant(data);
       case 'tenants.getAll':      return TenantsService.getAllTenants();
-      case 'tenants.getByUnit':   return TenantsService.getTenantsByUnit(data.unit_id);
+      case 'tenants.getByUnit':   return _ensurePhotoSharing(TenantsService.getTenantsByUnit(data.unit_id));
       case 'tenants.archive':     return TenantsService.archiveTenant(data.tenant_id, data.archived_by);
       case 'tenants.history':     return TenantsService.getTenantHistory(data.unit_id);
       case 'tenants.getById':     return TenantsService.getTenantById(data.tenant_id);
