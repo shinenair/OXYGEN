@@ -21,5 +21,9 @@
         "serviceId": "drive"
       }
     ]
+  },
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "ANYONE"
   }
 }
