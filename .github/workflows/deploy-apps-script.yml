@@ -1,0 +1,51 @@
+name: Deploy to Apps Script
+
+# Deploys OXYGEN automatically: whenever code inside src/ changes on the
+# main branch (e.g. a pull request is merged), this pushes the code into
+# the Apps Script project AND updates the live web app deployment — same
+# /exec URL, so the GitHub Pages wrapper never needs touching.
+#
+# Can also be run by hand: repo → Actions → "Deploy to Apps Script" →
+# Run workflow.
+#
+# Requirements (one-time setup — see SETUP-CLASP.md):
+#   • .clasp.json in the repo root must contain the real Script ID
+#   • repository secret CLASPRC_JSON with the clasp login credentials
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Restore clasp credentials
+        run: printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+
+      - name: Push code to the Apps Script project
+        run: clasp push -f
+
+      - name: Update the live web app (same /exec URL)
+        run: clasp deploy -i "$DEPLOYMENT_ID" -d "Auto-deploy from GitHub ($GITHUB_SHA)"
+        env:
+          # The web app deployment OXYGEN serves from — the AKfycb… part
+          # of the /exec URL embedded in index.html. Updating THIS
+          # deployment keeps the URL unchanged.
+          DEPLOYMENT_ID: AKfycbzrnL4jWaOYxUiyrco-lJTeb3Txvi471xl6SBI7p_tQW-NGighahdVNywhEGpGh4Ndr
