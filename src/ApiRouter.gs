@@ -525,7 +525,11 @@ var ApiRouter = (function() {
   }
 
   function _dashboardData(year) {
-    var activeYear = Number(year) || SettingsService.getActiveYear();
+    // viewYear = the year this payload is filtered to (the caller may
+    // ask for any year); settingsYear = the app-wide Active Year, which
+    // the Dashboard banner must keep showing regardless of the view.
+    var settingsYear = SettingsService.getActiveYear();
+    var activeYear = Number(year) || settingsYear;
 
     // Fetch ONCE, unfiltered — reconcile() needs the FULL chronological
     // chain (a year's opening balance depends on the previous year's true
@@ -603,7 +607,8 @@ var ApiRouter = (function() {
 
     var settingsAll = SettingsService.getAll();
     return { months: months, balance: latest, payments: pRows, recon: recon,
-             units: units, owners: owners, tenants: tenants, activeYear: activeYear,
+             units: units, owners: owners, tenants: tenants,
+             activeYear: settingsYear, viewYear: activeYear,
              feeMaintenance: Number(settingsAll.fee_maintenance) || 0,
              feeWaste: Number(settingsAll.fee_waste) || 0 };
   }

@@ -14,7 +14,7 @@
         <span style="font-weight:700;font-size:11.5px;white-space:nowrap;">🌐 Active:</span>
         <span id="dash-active-year-display" style="font-weight:800;font-size:14px;color:var(--accent);">…</span>
       </div>
-      <select id="dash-year" onchange="dashRender()" style="width:90px;padding:5px 8px;font-size:12px;" title="View a different year on this page (doesn't change the Active Year)"></select>
+      <select id="dash-year" onchange="dashYearChanged()" style="width:90px;padding:5px 8px;font-size:12px;" title="View a different year on this page (doesn't change the Active Year)"></select>
     </div>
   </div>
   <div class="dash-tiles-block">
@@ -144,7 +144,11 @@ var dashData = null;      // payload from dashboard.data
 var dashPayMap = {};      // 'UNIT|type|YYYY-MM' -> amount
 var dashInit = false;
 
-function refreshDashboard() {
+// The server filters the whole payload to ONE year — the Active Year by
+// default, or any year explicitly asked for. The year dropdown must
+// therefore RE-FETCH, not just re-render: the other years' data was
+// never in the browser to begin with.
+function refreshDashboard(year) {
   var tiles = document.getElementById('dash-tiles');
   if (tiles) tiles.innerHTML = loadingHtml('Loading dashboard…');
   google.script.run
@@ -162,7 +166,12 @@ function refreshDashboard() {
     .withFailureHandler(function(e) {
       if (tiles) tiles.innerHTML = '<div style="color:var(--c-rejected-fg);padding:16px;">Error: ' + e + '</div>';
     })
-    .doPost_internal('dashboard.data', {});
+    .doPost_internal('dashboard.data', year ? { year: year } : {});
+}
+
+function dashYearChanged() {
+  var y = parseInt((document.getElementById('dash-year') || {}).value, 10);
+  refreshDashboard(y || undefined);
 }
 
 // The Universal Active Year banner — everyone sees which year the whole
@@ -205,7 +214,10 @@ function dashPopulateFilters() {
   for (var i = 0; i < list.length; i++) html += '<option value="' + list[i] + '">' + list[i] + '</option>';
   ySel.innerHTML = html;
   if (!dashInit) {
-    ySel.value = String(curY);
+    // First load: the payload is filtered to the Active Year — the
+    // selector must show THAT year, or the visible data and the
+    // dropdown would disagree.
+    ySel.value = String(dashData.viewYear || curY);
     var mSel = document.getElementById('dash-month');
     if (mSel) mSel.value = String(now.getMonth() + 1);
     dashInit = true;
