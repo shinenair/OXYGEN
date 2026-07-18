@@ -149,6 +149,14 @@ var dashInit = false;
 // therefore RE-FETCH, not just re-render: the other years' data was
 // never in the browser to begin with.
 function refreshDashboard(year) {
+  // No explicit year (the ↻ Refresh button, or a data-changing action
+  // elsewhere re-running the dashboard): keep showing the year the
+  // viewer is ON — otherwise a refresh while viewing 2023 would fetch
+  // the Active Year's payload and render 2023 as empty.
+  if (year === undefined && dashInit) {
+    var ySel = document.getElementById('dash-year');
+    if (ySel && ySel.value) year = parseInt(ySel.value, 10) || undefined;
+  }
   var tiles = document.getElementById('dash-tiles');
   if (tiles) tiles.innerHTML = loadingHtml('Loading dashboard…');
   google.script.run
