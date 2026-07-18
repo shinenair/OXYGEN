@@ -33,8 +33,29 @@ var ApiRouter = (function() {
     return (data && String(data.account) === '2') ? Bank2Service : BankService;
   }
 
+  // Actions reachable WITHOUT being a recognized member — only the
+  // PIN bootstrap itself (how an unidentified visitor becomes
+  // identified) and sign-out. Everything else requires membership.
+  var PUBLIC_ACTIONS = { 'auth.verifyPin': 1, 'auth.signOut': 1 };
+
+  // MEMBERS ONLY — the server-side gate matching doGet's locked page.
+  // A caller counts as a member when Google reveals an email that's on
+  // the Users sheet (the owner always qualifies), or when they hold a
+  // PIN-verified identity in this session's cache. Everyone else is
+  // refused EVERY route, so the data stays private even for someone
+  // who bypasses the page and calls the API directly.
+  function _requireMember(action) {
+    var email = '';
+    try { email = Session.getActiveUser().getEmail(); } catch (e) {}
+    if (email && UsersService.getRole(email)) return;
+    var cached = AuthService.getCachedIdentity();
+    if (cached && cached.email) return;
+    throw new Error('Access denied — OXYGEN is a private application of the Confident Daffodils Owners Association. Reload the page and enter your PIN, or contact an Administrator.');
+  }
+
   function route(action, data) {
     try {
+      if (!PUBLIC_ACTIONS[action]) _requireMember(action);
       var result = _dispatch(action, data);
       return { success: true, data: result };
     } catch (err) {
