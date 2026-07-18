@@ -107,8 +107,59 @@ function toDateInput(val) {
   return '';
 }
 
-function openUnitProfile(unitId) {
-  // Open modal immediately with loading state
+// ── Instant-open machinery ────────────────────────────────────
+// The full profile payload needs a slow server call (it scans several
+// whole sheets). Two tricks make opening feel immediate:
+//  1. Session cache: each unit's last payload is kept for the session —
+//     reopening renders the full profile INSTANTLY from it, while a
+//     background fetch refreshes the data and silently re-renders.
+//  2. Instant preview: on a first open, the list pages have already
+//     loaded every unit/owner/tenant — the banner renders from that at
+//     once, with a spinner where the ledger will appear.
+var upProfileCache = {};  // unit_id -> last units.profile payload
+var upOpenSeq = 0;        // guards against a slow response landing after
+                          // the user closed this unit and opened another
+
+// Basics (unit / first owner / first tenant) from whichever list page's
+// cache happens to be loaded — Units page first, then Fees Received.
+function _upCachedBasics(unitId) {
+  var uk = String(unitId).toUpperCase();
+  function findUnit(list) {
+    if (!list || !list.length) return null;
+    for (var i = 0; i < list.length; i++) if (String(list[i].unit_id).toUpperCase() === uk) return list[i];
+    return null;
+  }
+  var unit = findUnit(typeof unitsAll !== 'undefined' ? unitsAll : null) ||
+             findUnit(typeof feesUnits !== 'undefined' ? feesUnits : null);
+  var owner  = (typeof unitOwnerMap  !== 'undefined' && unitOwnerMap[uk])  || (typeof feesOwners  !== 'undefined' && feesOwners[uk])  || null;
+  var tenant = (typeof unitTenantMap !== 'undefined' && unitTenantMap[uk]) || (typeof feesTenants !== 'undefined' && feesTenants[uk]) || null;
+  return { unit: unit, owner: owner, tenant: tenant };
+}
+
+function _upPreviewHtml(unitId, b) {
+  var towerName = unitId[0] === 'A' ? 'Tower One (A)' : 'Tower Two (B)';
+  var isOcc = !b.unit || b.unit.occupancy !== 'Unoccupied';
+  var bannerBg = isOcc ? 'linear-gradient(135deg,#0b5e46,#0f7a5a)' : 'linear-gradient(135deg,#7a1f2b,#9b2c3a)';
+  var pic = b.owner && b.owner.profile_picture ? _upPhotoUrl(b.owner.profile_picture) : '';
+  return '<div style="display:flex;align-items:center;gap:16px;padding:16px 20px;background:' + bannerBg + ';border-radius:var(--radius-md);margin-bottom:20px;">' +
+      (pic
+        ? '<img src="' + _e(pic) + '" onerror="this.style.display=\'none\'" style="width:96px;height:96px;border-radius:14px;object-fit:cover;flex-shrink:0;border:2px solid rgba(255,255,255,.45);">'
+        : '<div style="background:rgba(255,255,255,.16);color:#fff;border-radius:12px;width:96px;height:96px;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:22px;font-weight:700;flex-shrink:0;">' + _e(unitId) + '</div>') +
+      '<div style="flex:1;">' +
+        '<div style="font-family:var(--font-display);font-size:22px;font-weight:700;color:#fff;">' + _e(unitId) + '</div>' +
+        '<div style="color:rgba(255,255,255,.7);font-size:13px;">' + towerName + (b.unit ? ' · Floor ' + _e(b.unit.floor || '—') : '') + '</div>' +
+        (b.owner && b.owner.name ? '<div style="color:#fff;font-size:15px;font-weight:700;margin-top:4px;">👤 ' + _e(b.owner.name) + '</div>' : '') +
+        (b.tenant && b.tenant.name ? '<div style="color:rgba(255,255,255,.85);font-size:12.5px;margin-top:2px;">🏠 ' + _e(b.tenant.name) + '</div>' : '') +
+      '</div>' +
+    '</div>' +
+    '<div class="loading"><div class="spinner"></div> Loading full profile…</div>';
+}
+
+function openUnitProfile(unitId, forceFresh) {
+  upOpenSeq++;
+  var seq = upOpenSeq;
+
+  // Open modal immediately
   openModal(
     '<div class="modal-header" style="position:sticky;top:0;z-index:10;background:var(--bg-surface);">' +
       '<span class="modal-title">🏢 Unit ' + unitId + ' — Full Profile</span>' +
@@ -127,12 +178,30 @@ function openUnitProfile(unitId) {
     box.style.maxHeight = '92vh';
   }
 
-  // One bundled server call instead of five separate round trips — much
-  // faster to open. Unit data comes fresh from the server every time.
-  var unitFallback = (typeof allUnits !== 'undefined' ? allUnits : []).find(function(u) { return u.unit_id === unitId; }) || { unit_id: unitId, tower: unitId[0], floor: unitId[1], status: '—' };
+  var cached = !forceFresh && upProfileCache[unitId];
+  var unitFallback = _upCachedBasics(unitId).unit || { unit_id: unitId, tower: unitId[0], floor: unitId[1], status: '—' };
+
+  if (cached) {
+    // Full profile instantly from the session cache; the fetch below
+    // refreshes it silently.
+    renderProfile(unitId, cached.unit || unitFallback, cached.owners || [],
+      cached.tenants || [], cached.payments || [], cached.bank || []);
+  } else {
+    // First open this session: rich preview from the list pages' data.
+    var b = _upCachedBasics(unitId);
+    if (b.unit || b.owner || b.tenant) {
+      var pv = document.getElementById('uprf-body');
+      if (pv) pv.innerHTML = _upPreviewHtml(unitId, b);
+    }
+  }
+
   google.script.run
     .withSuccessHandler(function(r) {
       var d = (r && r.success && r.data) ? r.data : {};
+      upProfileCache[unitId] = d;
+      // Only render if this profile is still the one on screen — the
+      // user may have closed it or opened a different unit meanwhile.
+      if (seq !== upOpenSeq || !document.getElementById('uprf-body')) return;
       renderProfile(unitId,
         d.unit     || unitFallback,
         d.owners   || [],
@@ -141,6 +210,8 @@ function openUnitProfile(unitId) {
         d.bank     || []);
     })
     .withFailureHandler(function(e) {
+      if (seq !== upOpenSeq) return;
+      if (cached) return; // stale-but-rendered beats an error screen
       var body = document.getElementById('uprf-body');
       if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:20px;">Failed to load profile: ' + e + '<br><br><button class="btn btn-sm btn-outline" onclick="openUnitProfile(\'' + unitId + '\')">Retry</button></div>';
     })
@@ -781,10 +852,12 @@ function upSaveLpgFlag(readingId, flagged) {
 
 // Close whatever modal is open and return to the Unit Full Profile.
 // Used by the edit windows' Cancel / ✕ so closing an edit never dumps the
-// user back to the Units page.
+// user back to the Units page. Always re-fetches (forceFresh) — an edit
+// may just have changed this unit, and briefly flashing the pre-edit
+// cached data would look like the save didn't happen.
 function upBackToProfile(unitId) {
   closeModalForce();
-  setTimeout(function() { openUnitProfile(unitId); }, 120);
+  setTimeout(function() { openUnitProfile(unitId, true); }, 120);
 }
 
 // Save the occupancy / registration flags, then re-render the profile so the
@@ -802,7 +875,7 @@ function upSaveFlags(unitId) {
     .withSuccessHandler(function(r) {
       if (r && r.success) {
         showToast('Unit flags updated', 'success');
-        openUnitProfile(unitId);
+        openUnitProfile(unitId, true);
         if (typeof loadUnits === 'function') loadUnits();
       } else { showToast((r && r.error) || 'Failed to update', 'error'); }
     })
@@ -920,7 +993,7 @@ function upTimelineSave(month, attribute) {
   doPostWithHistoryConfirm('occupancy.setStatus',
     { unit_id: upTimelineUnitId, attribute: attribute, effective_month: month, value: value },
     function(r) {
-      if (r && r.success) { showToast('Saved — effective from ' + month + ' onward', 'success'); closeModalForce(); setTimeout(function(){ openUnitProfile(upTimelineUnitId); }, 150); }
+      if (r && r.success) { showToast('Saved — effective from ' + month + ' onward', 'success'); closeModalForce(); setTimeout(function(){ openUnitProfile(upTimelineUnitId, true); }, 150); }
       else showToast((r && r.error) || 'Failed', 'error');
     },
     function(e) { showToast('Error: ' + e, 'error'); });
@@ -937,7 +1010,7 @@ function upTimelineRemoveEntry(month, attribute) {
     if (!entry) { showToast('No explicit entry found for that month', 'error'); return; }
     doPostWithHistoryConfirm('occupancy.deleteEntry', { entry_id: entry.entry_id },
       function(r2) {
-        if (r2 && r2.success) { showToast('Removed — inherits the prior value again', 'success'); closeModalForce(); setTimeout(function(){ openUnitProfile(upTimelineUnitId); }, 150); }
+        if (r2 && r2.success) { showToast('Removed — inherits the prior value again', 'success'); closeModalForce(); setTimeout(function(){ openUnitProfile(upTimelineUnitId, true); }, 150); }
         else showToast((r2 && r2.error) || 'Failed', 'error');
       },
       function(e) { showToast('Error: ' + e, 'error'); });
@@ -979,7 +1052,7 @@ function upDeleteRawEntry(entryId) {
   if (!confirm('Delete this entry? The affected month(s) will go back to inheriting whatever was in effect before it.')) return;
   doPostWithHistoryConfirm('occupancy.deleteEntry', { entry_id: entryId },
     function(r) {
-      if (r && r.success) { showToast('Deleted', 'success'); closeModalForce(); setTimeout(function(){ openUnitProfile(upTimelineUnitId); }, 150); }
+      if (r && r.success) { showToast('Deleted', 'success'); closeModalForce(); setTimeout(function(){ openUnitProfile(upTimelineUnitId, true); }, 150); }
       else showToast((r && r.error) || 'Failed', 'error');
     },
     function(e) { showToast('Error: ' + e, 'error'); });
@@ -1192,7 +1265,7 @@ function upArchiveOwner(ownerId, name, unitId) {
   showToast('Archiving…', '');
   google.script.run
     .withSuccessHandler(function(r) {
-      if (r && r.success) { showToast('Owner archived. Section cleared.', 'success'); ownersAll = []; openUnitProfile(unitId); }
+      if (r && r.success) { showToast('Owner archived. Section cleared.', 'success'); ownersAll = []; openUnitProfile(unitId, true); }
       else { showToast((r && r.error) || 'Failed to archive', 'error'); }
     })
     .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
@@ -1204,7 +1277,7 @@ function upArchiveTenant(tenantId, name, unitId) {
   showToast('Archiving…', '');
   google.script.run
     .withSuccessHandler(function(r) {
-      if (r && r.success) { showToast('Resident archived. Section cleared.', 'success'); tenantsAll = []; openUnitProfile(unitId); }
+      if (r && r.success) { showToast('Resident archived. Section cleared.', 'success'); tenantsAll = []; openUnitProfile(unitId, true); }
       else { showToast((r && r.error) || 'Failed to archive', 'error'); }
     })
     .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
