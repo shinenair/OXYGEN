@@ -1,0 +1,443 @@
+<!-- Committee.html — Office Bearers & EC Members of CDOA.
+     Current committee with contacts, duty allocation and assigned units
+     (payment follow-up responsibility); add/edit/delete; equal
+     auto-distribution of all units; archive-and-replace when the
+     committee changes; every past committee kept viewable. -->
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">👥 EC Committee</h1>
+    <p class="page-subtitle">Office Bearers &amp; EC Members — contacts, duty allocation, and each member's assigned units for payment follow-up</p>
+    <div style="display:flex;gap:6px;margin-top:8px;">
+      <button class="btn btn-sm" id="cm-tab-board" onclick="cmSwitchTab('board')" title="The color-coded TEAM ALLOCATION sheet, generated live — who is pending for MF/WMF/LPG in any month">🎯 Follow-up Board</button>
+      <button class="btn btn-sm btn-outline" id="cm-tab-current" onclick="cmSwitchTab('current')">👥 Current Committee</button>
+      <button class="btn btn-sm btn-outline" id="cm-tab-past" onclick="cmSwitchTab('past')">📜 Past Committees</button>
+    </div>
+  </div>
+  <button class="btn btn-accent btn-sm" onclick="cmOpenAdd()">➕ Add Member</button>
+  <button class="btn btn-outline btn-sm" onclick="cmAutoAllocate()" title="Distributes every unit equally, in consecutive blocks, among current members flagged for allocation">⚖️ Auto-Distribute Units</button>
+  <button class="btn btn-outline btn-sm" onclick="cmArchive()" title="Archives the whole current committee under a term label so a new committee can be entered">📦 Archive Committee</button>
+  <button class="btn btn-outline btn-sm" onclick="cmLoad(true)">🔄 Refresh</button>
+</div>
+
+<div class="card" id="cm-current-view" style="display:none;">
+  <div class="card-body">
+    <div id="cm-status" style="margin-bottom:10px;"></div>
+    <div id="cm-current-body"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<div class="card" id="cm-past-view" style="display:none;">
+  <div class="card-body">
+    <div id="cm-past-body"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<div class="card" id="cm-board-view">
+  <div class="card-body">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+      <select id="cmb-year" onchange="cmbLoad(true)" style="padding:7px 10px;font-size:13px;"></select>
+      <select id="cmb-month" onchange="cmbLoad(true)" style="padding:7px 10px;font-size:13px;"></select>
+      <span id="cmb-summary" style="font-size:12px;color:var(--text-muted);"></span>
+      <button class="btn btn-accent btn-sm" id="cmb-pdf-btn" onclick="cmbGeneratePdf()" style="margin-left:auto;">📄 Generate PDF</button>
+    </div>
+    <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;font-size:11.5px;flex-wrap:wrap;">
+      <span><span style="display:inline-block;width:14px;height:14px;background:#34A853;border-radius:3px;vertical-align:middle;"></span> Paid</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:#980000;border-radius:3px;vertical-align:middle;"></span> Not Paid</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:#FBBC04;border-radius:3px;vertical-align:middle;"></span> Unoccupied / N-A</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:#000000;border:1px solid #666;border-radius:3px;vertical-align:middle;"></span> Unregistered</span>
+    </div>
+    <div id="cmb-body"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<style>
+  /* Edit/Delete appear on row hover only — same behaviour as the rest of the app */
+  #cm-current-body .cm-act { opacity: 0; transition: opacity .15s; }
+  #cm-current-body tr:hover .cm-act { opacity: 1; }
+  /* Follow-up Board: white grid on the dark palette, and a bold white
+     rectangle around each member's whole block (name + 3 fee rows) */
+  .cmb-table td, .cmb-table th { border: 1px solid rgba(255,255,255,.65); }
+
+  /* The board is inherently wide (up to ~17 unit columns per member) —
+     rather than trying to squeeze it into a single narrow column, the
+     first five identifying columns (#, member, totals, fee) stay fixed
+     in place while the unit columns scroll underneath, exactly like a
+     mobile banking app's transaction table. Fixed pixel widths are
+     required for position:sticky's left offsets to line up correctly. */
+  .cmb-col-num    { position:sticky; left:0px;   z-index:3; width:30px;  min-width:30px;  max-width:30px; }
+  .cmb-col-member { position:sticky; left:30px;  z-index:3; width:130px; min-width:130px; max-width:130px; }
+  .cmb-col-total  { position:sticky; left:160px; z-index:3; width:44px;  min-width:44px;  max-width:44px; }
+  .cmb-col-def    { position:sticky; left:204px; z-index:3; width:40px;  min-width:40px;  max-width:40px; }
+  .cmb-col-fee    { position:sticky; left:244px; z-index:3; width:40px;  min-width:40px;  max-width:40px; }
+  /* Sticky cells need their own solid background, or scrolled unit
+     columns would show through underneath them. */
+  .cmb-table thead .cmb-col-num, .cmb-table thead .cmb-col-member,
+  .cmb-table thead .cmb-col-total, .cmb-table thead .cmb-col-def, .cmb-table thead .cmb-col-fee { background:#000; }
+  .cmb-table { border: 2px solid #fff; }
+  .cmb-block-top td { border-top: 3px solid #fff !important; }
+  .cmb-block-bottom td { border-bottom: 3px solid #fff !important; }
+</style>
+
+<script>
+var cmData = null;
+var cmTab = 'board';
+var CM_ROLES = ['President', 'Secretary', 'Treasurer', 'Exec Mem', 'Caretaker', 'OFFICE'];
+
+function cmE(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function cmShowStatus(msg, type) {
+  var el = document.getElementById('cm-status');
+  if (!el) return;
+  if (!msg) { el.innerHTML = ''; return; }
+  var bg = type === 'success' ? 'var(--c-verified-bg)' : type === 'error' ? 'var(--c-rejected-bg)' : 'var(--bg-surface2)';
+  var fg = type === 'success' ? 'var(--c-verified-fg)' : type === 'error' ? 'var(--c-rejected-fg)' : 'var(--text-secondary)';
+  el.innerHTML = '<div style="background:' + bg + ';color:' + fg + ';padding:8px 12px;border-radius:6px;font-size:12.5px;">' + msg + '</div>';
+}
+
+function cmSwitchTab(tab) {
+  cmTab = tab;
+  var t1 = document.getElementById('cm-tab-current');
+  var t2 = document.getElementById('cm-tab-past');
+  var t3 = document.getElementById('cm-tab-board');
+  if (t1) t1.className = 'btn btn-sm' + (tab === 'current' ? '' : ' btn-outline');
+  if (t2) t2.className = 'btn btn-sm' + (tab === 'past' ? '' : ' btn-outline');
+  if (t3) t3.className = 'btn btn-sm' + (tab === 'board' ? '' : ' btn-outline');
+  document.getElementById('cm-current-view').style.display = tab === 'current' ? '' : 'none';
+  document.getElementById('cm-past-view').style.display = tab === 'past' ? '' : 'none';
+  document.getElementById('cm-board-view').style.display = tab === 'board' ? '' : 'none';
+  if (tab === 'board') cmbInit();
+}
+
+// ── 🎯 Follow-up Board — the color-coded TEAM ALLOCATION sheet, live ──
+var cmbData = null;
+var cmbInited = false;
+
+function cmbInit() {
+  if (cmbInited) { return; }
+  cmbInited = true;
+  var ySel = document.getElementById('cmb-year');
+  var mSel = document.getElementById('cmb-month');
+  var now = new Date();
+  var thisYear = now.getFullYear();
+  for (var y = thisYear; y >= 2023; y--) ySel.innerHTML += '<option value="' + y + '">' + y + '</option>';
+  var mn = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  for (var m = 0; m < 12; m++) mSel.innerHTML += '<option value="' + (m + 1) + '"' + (m === now.getMonth() ? ' selected' : '') + '>' + mn[m] + '</option>';
+  cmbLoad(true);
+}
+
+function cmbLoad(showSpinner) {
+  var body = document.getElementById('cmb-body');
+  var year = Number((document.getElementById('cmb-year') || {}).value);
+  var month = Number((document.getElementById('cmb-month') || {}).value);
+  if (!year || !month) return;
+  if (body && showSpinner) body.innerHTML = loadingHtml('Building the board…');
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:14px;">Error: ' + cmE(r ? r.error : 'failed') + '</div>'; return; }
+    cmbData = r.data;
+    cmbRender();
+  }).withFailureHandler(function(e) {
+    if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:14px;">Error: ' + cmE(e) + '</div>';
+  }).doPost_internal('committee.followUpBoard', { year: year, month: month });
+}
+
+function cmbRender() {
+  var d = cmbData;
+  var body = document.getElementById('cmb-body');
+  var summary = document.getElementById('cmb-summary');
+  if (!body || !d) return;
+
+  if (summary) summary.textContent = 'Generated: ' + d.generatedDate + ' · Pending — MF: ' + d.pendingTotals['Maintenance'] + ' · WMF: ' + d.pendingTotals['Waste Management'] + ' · LPG: ' + d.pendingTotals['LPG'];
+  if (!d.members.length) { body.innerHTML = '<div style="color:var(--text-muted);padding:14px;">No current members have units assigned. Use ⚖️ Auto-Distribute Units on the Current Committee tab first.</div>'; return; }
+
+  var TYPE_SHORT = { 'Maintenance': 'MF', 'Waste Management': 'WMF', 'LPG': 'LPG' };
+  var COLORS = { paid: '#34A853', pending: '#980000', uo: '#FBBC04', unreg: '#000000' };
+  var GRID = 'border:1px solid #fff;'; // dark palette — gridlines are WHITE throughout
+
+  var h = '<div class="table-wrap" style="max-height:72vh;overflow:auto;">' +
+    '<table class="cmb-table" style="border-collapse:collapse;min-width:' + (360 + d.maxUnits * 58) + 'px;">' +
+    '<thead><tr style="background:#000;color:#fff;">' +
+    '<th class="cmb-col-num" style="padding:6px 8px;' + GRID + '">#</th>' +
+    '<th class="cmb-col-member" style="padding:6px 8px;' + GRID + 'text-align:left;">TEAM MEMBER</th>' +
+    '<th class="cmb-col-total" style="padding:6px 6px;' + GRID + '" title="This member\'s total defaulters across all three fees">TOTAL</th>' +
+    '<th class="cmb-col-def" style="padding:6px 6px;' + GRID + '" title="Defaulters for the fee on each row">DEF</th>' +
+    '<th class="cmb-col-fee" style="padding:6px 8px;' + GRID + '">FEE</th>' +
+    '<th style="padding:6px 8px;' + GRID + '" colspan="' + d.maxUnits + '">FLATS ASSIGNED — ' + cmE(d.monthName) + ' ' + d.year + '</th>' +
+    '</tr>' +
+    // Numbering row 1..N, exactly like the original sheet
+    '<tr style="background:#073763;color:#fff;font-size:10px;">' +
+    '<th class="cmb-col-num" style="' + GRID + 'background:#073763;"></th><th class="cmb-col-member" style="' + GRID + 'background:#073763;"></th><th class="cmb-col-total" style="' + GRID + 'background:#073763;"></th><th class="cmb-col-def" style="' + GRID + 'background:#073763;"></th><th class="cmb-col-fee" style="' + GRID + 'background:#073763;"></th>';
+  for (var n = 1; n <= d.maxUnits; n++) h += '<th style="padding:2px;' + GRID + 'font-weight:700;">' + n + '</th>';
+  h += '</tr></thead><tbody>';
+
+  d.members.forEach(function(m, mi) {
+    var frame = mi % 2 === 0 ? '#073763' : '#0E2D4A';
+    d.types.forEach(function(ty, ti) {
+      // Every member's block is wrapped in a BOLD white rectangle: top
+      // edge on the first row, bottom edge on the third, and the thick
+      // left/right edges carried by the first and last cells of each row.
+      var rowCls = ti === 0 ? ' class="cmb-block-top"' : (ti === 2 ? ' class="cmb-block-bottom"' : '');
+      h += '<tr' + rowCls + '>';
+      if (ti === 0) {
+        h += '<td class="cmb-col-num" rowspan="3" style="background:' + frame + ';color:#fff;font-weight:700;padding:6px 8px;' + GRID + 'border-left:3px solid #fff;text-align:center;vertical-align:middle;">' + (mi + 1) + '</td>' +
+             '<td class="cmb-col-member" rowspan="3" style="background:' + frame + ';color:#fff;font-weight:700;padding:6px 10px;' + GRID + 'vertical-align:middle;white-space:nowrap;">' + cmE(m.name) + '</td>' +
+             '<td class="cmb-col-total" rowspan="3" style="background:' + frame + ';color:#fff;font-weight:800;font-size:15px;padding:6px;' + GRID + 'text-align:center;vertical-align:middle;" title="' + cmE(m.name) + ' — total defaulters across MF + WMF + LPG">' + m.totalPending + '</td>';
+      }
+      h += '<td class="cmb-col-def" style="background:' + frame + ';color:#fff;font-weight:800;font-size:12px;padding:4px 6px;' + GRID + 'text-align:center;" title="' + cmE(m.name) + ' — ' + TYPE_SHORT[ty] + ' defaulters">' + m.perTypePending[ty] + '</td>';
+      h += '<td class="cmb-col-fee" style="background:' + frame + ';color:#fff;font-weight:700;font-size:11px;padding:4px 6px;' + GRID + 'text-align:center;">' + TYPE_SHORT[ty] + '</td>';
+      m.rows[ty].forEach(function(cell, ci) {
+        var fg = cell.s === 'uo' ? '#000' : '#fff';
+        var label = cell.s === 'paid' ? 'Paid' : cell.s === 'pending' ? 'NOT PAID' : cell.s === 'uo' ? 'Unoccupied / N-A' : 'Unregistered';
+        var rightEdge = (ci === d.maxUnits - 1) ? 'border-right:3px solid #fff;' : '';
+        h += '<td style="background:' + COLORS[cell.s] + ';color:' + fg + ';font-weight:700;font-size:11px;padding:5px 4px;' + GRID + rightEdge + 'text-align:center;cursor:pointer;" ' +
+             'title="' + cmE(cell.unit) + ' — ' + TYPE_SHORT[ty] + ' ' + cmE(d.monthName) + ': ' + label + '. Click to open Unit Profile." ' +
+             'onclick="openUnitProfile(\'' + cmE(cell.unit) + '\')">' + cmE(cell.unit) + '</td>';
+      });
+      for (var pad = m.unitCount; pad < d.maxUnits; pad++) {
+        var rightEdge2 = (pad === d.maxUnits - 1) ? 'border-right:3px solid #fff;' : '';
+        h += '<td style="background:' + frame + ';' + GRID + rightEdge2 + '"></td>';
+      }
+      h += '</tr>';
+    });
+  });
+  h += '</tbody></table></div>';
+  body.innerHTML = h;
+}
+
+function cmbGeneratePdf() {
+  var year = Number((document.getElementById('cmb-year') || {}).value);
+  var month = Number((document.getElementById('cmb-month') || {}).value);
+  if (!year || !month) return;
+  var btn = document.getElementById('cmb-pdf-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Generating…'; }
+  google.script.run.withSuccessHandler(function(r) {
+    if (btn) { btn.disabled = false; btn.textContent = '📄 Generate PDF'; }
+    if (!r || !r.success) { showToast((r && r.error) || 'Failed', 'error'); return; }
+    rpDownloadBase64Pdf(r.data.base64, r.data.filename);
+    showToast('✓ Downloaded ' + r.data.filename, 'success');
+  }).withFailureHandler(function(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '📄 Generate PDF'; }
+    showToast('Error: ' + e, 'error');
+  }).doPost_internal('committee.followUpPdf', { year: year, month: month });
+}
+
+function cmLoad(isManualRefresh) {
+  var body = document.getElementById('cm-current-body');
+  if (body && (isManualRefresh || !cmData)) body.innerHTML = loadingHtml('Loading the committee…');
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:14px;">Error: ' + cmE(r ? r.error : 'failed') + '</div>'; return; }
+    cmData = r.data;
+    cmRenderCurrent();
+    cmRenderPast();
+  }).withFailureHandler(function(e) {
+    if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:14px;">Error: ' + cmE(e) + '</div>';
+  }).doPost_internal('committee.getAll', {});
+}
+
+function cmRoleBadge(role) {
+  var colors = { 'President':'#f59e0b', 'Secretary':'#3b82f6', 'Treasurer':'#10b981', 'Exec Mem':'#8b5cf6', 'Caretaker':'#64748b', 'OFFICE':'#64748b' };
+  var c = colors[role] || '#64748b';
+  return '<span class="pill" style="background:' + c + '22;color:' + c + ';font-weight:700;font-size:11px;">' + cmE(role) + '</span>';
+}
+
+function cmRenderCurrent() {
+  var body = document.getElementById('cm-current-body');
+  if (!body || !cmData) return;
+
+  if (cmData.isEmpty) {
+    body.innerHTML =
+      '<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:16px;font-size:13px;line-height:1.7;">' +
+      '<strong>No committee data yet.</strong> Load the initial data prepared from the association\'s own four spreadsheets — ' +
+      'the current committee (contacts, duties, unit allocations) plus every past committee since Jan 2023:<br><br>' +
+      '<button class="btn btn-accent btn-sm" onclick="cmSeed()">📥 Load Initial Committee Data</button></div>';
+    return;
+  }
+
+  var h = '<div class="table-wrap" style="max-height:70vh;overflow:auto;"><table class="forms-table" style="min-width:1000px;"><thead><tr>' +
+    '<th style="width:36px;">#</th><th>Role</th><th>Name</th><th>Flat</th><th>Phone</th><th>Email</th><th>Duty / Department</th><th>Assigned Units</th><th style="width:88px;">Actions</th>' +
+    '</tr></thead><tbody>';
+  cmData.current.forEach(function(m, i) {
+    var units = m.units_assigned ? m.units_assigned.split(',').map(function(u){return u.trim();}).filter(Boolean) : [];
+    var unitsCell = units.length
+      ? '<span style="cursor:pointer;text-decoration:underline;color:var(--accent);font-weight:600;" onclick="cmShowUnits(\'' + m.member_id + '\')">' + units.length + ' units</span>'
+      : '<span style="color:var(--text-muted);">—</span>';
+    var flatCell = m.flat
+      ? '<span style="cursor:pointer;text-decoration:underline;color:var(--accent);" onclick="openUnitProfile(\'' + cmE(m.flat) + '\')">' + cmE(m.flat) + '</span>'
+      : '<span style="color:var(--text-muted);">—</span>';
+    h += '<tr>' +
+      '<td style="font-weight:700;color:var(--text-muted);">' + (i + 1) + '</td>' +
+      '<td>' + cmRoleBadge(m.role) + '</td>' +
+      '<td style="font-weight:600;">' + cmE(m.name) + '</td>' +
+      '<td>' + flatCell + '</td>' +
+      '<td style="white-space:nowrap;">' + cmE(m.phone) + '</td>' +
+      '<td>' + (m.email ? '<a href="mailto:' + cmE(m.email) + '" style="color:var(--accent);">' + cmE(m.email) + '</a>' : '—') + '</td>' +
+      '<td style="font-size:12px;">' + cmE(m.duty) + '</td>' +
+      '<td>' + unitsCell + '</td>' +
+      '<td style="white-space:nowrap;"><span class="cm-act">' +
+        '<button class="btn btn-xs btn-outline" title="Edit" onclick="cmOpenEdit(\'' + m.member_id + '\')">✏️</button> ' +
+        '<button class="btn btn-xs btn-outline" title="Delete" style="color:var(--c-rejected-fg);" onclick="cmDelete(\'' + m.member_id + '\',\'' + cmE(m.name) + '\')">🗑</button>' +
+      '</span></td>' +
+    '</tr>';
+  });
+  h += '</tbody></table></div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-top:8px;">Term: ' + cmE(cmData.current.length ? cmData.current[0].term_label : '') +
+       ' · Each member\'s assigned units are their payment follow-up responsibility. ⚖️ Auto-Distribute reassigns all units equally whenever the member count changes.</div>';
+  body.innerHTML = h;
+}
+
+function cmShowUnits(memberId) {
+  var m = null;
+  cmData.current.concat(cmData.archived).forEach(function(x) { if (x.member_id === memberId) m = x; });
+  if (!m) return;
+  var units = m.units_assigned.split(',').map(function(u){return u.trim();}).filter(Boolean);
+  var h = '<div class="modal-header"><span class="modal-title">🏢 Units assigned to ' + cmE(m.name) + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body"><div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">' + units.length + ' units — payment follow-up responsibility. Click any unit to open its profile.</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+  units.forEach(function(u) {
+    h += '<span class="pill" style="background:var(--accent-dim);color:var(--accent);font-weight:700;cursor:pointer;" onclick="closeModalForce();openUnitProfile(\'' + cmE(u) + '\')">' + cmE(u) + '</span>';
+  });
+  h += '</div></div>';
+  openModal(h);
+}
+
+function cmMemberForm(m) {
+  m = m || {};
+  var roleOpts = CM_ROLES.map(function(r) { return '<option value="' + r + '"' + (r === (m.role || 'Exec Mem') ? ' selected' : '') + '>' + r + '</option>'; }).join('');
+  return '<div class="form-group"><label>Role</label><select id="cmf-role" style="width:100%;">' + roleOpts + '</select></div>' +
+    '<div class="form-group"><label>Name</label><input id="cmf-name" type="text" value="' + cmE(m.name || '') + '" style="width:100%;"></div>' +
+    '<div class="form-group"><label>Flat</label><input id="cmf-flat" type="text" value="' + cmE(m.flat || '') + '" placeholder="e.g. A204" style="width:100%;"></div>' +
+    '<div class="form-group"><label>Phone</label><input id="cmf-phone" type="text" value="' + cmE(m.phone || '') + '" style="width:100%;"></div>' +
+    '<div class="form-group"><label>Email</label><input id="cmf-email" type="text" value="' + cmE(m.email || '') + '" style="width:100%;"></div>' +
+    '<div class="form-group"><label>Duty / Department</label><input id="cmf-duty" type="text" value="' + cmE(m.duty || '') + '" placeholder="e.g. WATER/SAFETY/SECURITY OFFICER" style="width:100%;"></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">' +
+      '<input type="checkbox" id="cmf-alloc"' + (m.allocate_units !== false && m.allocate_units !== undefined ? (m.allocate_units ? ' checked' : '') : ' checked') + '>' +
+      '<label for="cmf-alloc" style="margin:0;font-weight:400;font-size:12.5px;">Include in unit allocation (gets a share of the units for payment follow-up)</label></div>' +
+    '<div class="form-group"><label>Assigned Units (comma-separated — usually filled by ⚖️ Auto-Distribute)</label>' +
+      '<textarea id="cmf-units" rows="2" style="width:100%;font-size:12px;">' + cmE(m.units_assigned || '') + '</textarea></div>';
+}
+
+function cmReadForm() {
+  function gv(id) { var e = document.getElementById(id); return e ? e.value.trim() : ''; }
+  return { role: gv('cmf-role'), name: gv('cmf-name'), flat: gv('cmf-flat').toUpperCase(),
+           phone: gv('cmf-phone'), email: gv('cmf-email'), duty: gv('cmf-duty'),
+           allocate_units: !!(document.getElementById('cmf-alloc') || {}).checked,
+           units_assigned: gv('cmf-units') };
+}
+
+function cmOpenAdd() {
+  openModal('<div class="modal-header"><span class="modal-title">➕ Add Committee Member</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' + cmMemberForm(null) +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+    '<button class="btn btn-accent" onclick="cmSaveNew()">💾 Add Member</button></div></div>');
+}
+
+function cmSaveNew() {
+  var d = cmReadForm();
+  if (!d.name) { showToast('Name is required', 'error'); return; }
+  d.term_label = cmData && cmData.current.length ? cmData.current[0].term_label : '';
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Member added', 'success'); closeModalForce(); cmLoad(true); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('committee.add', d);
+}
+
+function cmOpenEdit(memberId) {
+  var m = null;
+  cmData.current.forEach(function(x) { if (x.member_id === memberId) m = x; });
+  if (!m) return;
+  openModal('<div class="modal-header"><span class="modal-title">✏️ Edit — ' + cmE(m.name) + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' + cmMemberForm(m) +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+    '<button class="btn btn-accent" onclick="cmSaveEdit(\'' + memberId + '\')">💾 Save Changes</button></div></div>');
+}
+
+function cmSaveEdit(memberId) {
+  var d = cmReadForm();
+  if (!d.name) { showToast('Name is required', 'error'); return; }
+  d.member_id = memberId;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Member updated', 'success'); closeModalForce(); cmLoad(true); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('committee.update', d);
+}
+
+function cmDelete(memberId, name) {
+  if (!confirm('Delete "' + name + '" from the committee?\n\nUse 📦 Archive Committee instead if the whole committee is changing — that keeps the record. Delete is for fixing a wrong entry.')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Member deleted', 'success'); cmLoad(true); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('committee.delete', { member_id: memberId });
+}
+
+function cmAutoAllocate() {
+  if (!confirm('Distribute ALL units equally among the current members flagged for allocation?\n\nThis REPLACES every member\'s current unit assignment with fresh consecutive blocks.')) return;
+  cmShowStatus('⏳ Distributing units…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) {
+      var lines = r.data.summary.map(function(s) { return s.name + ': ' + s.count + ' (' + s.from + ' → ' + s.to + ')'; }).join(' · ');
+      cmShowStatus('✓ ' + r.data.unitsDistributed + ' units distributed among ' + r.data.members + ' members — ' + lines, 'success');
+      cmLoad(true);
+    } else cmShowStatus('❌ ' + ((r && r.error) || 'Failed'), 'error');
+  }).withFailureHandler(function(e) { cmShowStatus('❌ Error: ' + e, 'error'); })
+    .doPost_internal('committee.autoAllocate', {});
+}
+
+function cmArchive() {
+  var label = prompt('Archive the ENTIRE current committee?\n\nEnter a term label for the record (e.g. "10 Oct 2024 → 15 Mar 2026"):');
+  if (!label || !label.trim()) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Archived ' + r.data.archived + ' member(s) under "' + label + '" — add the new committee now', 'success'); cmLoad(true); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('committee.archive', { term_label: label.trim() });
+}
+
+function cmSeed() {
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Loaded ' + r.data.current + ' current member(s) + ' + r.data.archived + ' historic record(s)', 'success'); cmLoad(true); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('committee.seed', {});
+}
+
+function cmRenderPast() {
+  var body = document.getElementById('cm-past-body');
+  if (!body || !cmData) return;
+  if (!cmData.archived.length) { body.innerHTML = '<div style="color:var(--text-muted);padding:14px;">No archived committees yet. When the committee changes, use 📦 Archive Committee — the outgoing team is preserved here.</div>'; return; }
+
+  // Group by term label, most recent group last in data — show reversed.
+  var groups = {};
+  var order = [];
+  cmData.archived.forEach(function(m) {
+    if (!groups[m.term_label]) { groups[m.term_label] = []; order.push(m.term_label); }
+    groups[m.term_label].push(m);
+  });
+  order.reverse();
+
+  var h = '';
+  order.forEach(function(term) {
+    h += '<div style="font-family:var(--font-display);font-size:15px;font-weight:700;margin:14px 0 6px;padding-bottom:4px;border-bottom:2px solid var(--gold,#f59e0b);">📜 ' + cmE(term) + '</div>';
+    h += '<div class="table-wrap"><table class="forms-table"><thead><tr><th style="width:36px;">#</th><th>Role</th><th>Name</th><th>Flat</th><th>Phone</th><th>Email</th><th>Duty</th></tr></thead><tbody>';
+    groups[term].forEach(function(m, i) {
+      h += '<tr><td style="font-weight:700;color:var(--text-muted);">' + (i + 1) + '</td>' +
+        '<td>' + cmRoleBadge(m.role) + '</td><td style="font-weight:600;">' + cmE(m.name) + '</td>' +
+        '<td>' + cmE(m.flat || '—') + '</td><td>' + cmE(m.phone || '—') + '</td>' +
+        '<td>' + cmE(m.email || '—') + '</td><td style="font-size:12px;">' + cmE(m.duty || '—') + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  });
+  body.innerHTML = h;
+}
+
+function committeePageInit() { cmLoad(); cmbInit(); }
+</script>

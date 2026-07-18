@@ -1,0 +1,256 @@
+<!-- PaymentCalendar.html -->
+<div class="page-header">
+  <div>
+    <h1 class="page-title">📅 Payment Calendar</h1>
+    <p class="page-subtitle">Month-wise payment tracking for every unit</p>
+  </div>
+</div>
+
+<div class="filters-row" style="margin-bottom:20px">
+  <div class="form-group" style="margin:0">
+    <input type="month" id="cal-month" style="width:auto;padding:8px 12px;font-size:14px">
+  </div>
+  <select id="cal-tower" style="width:auto;padding:8px 10px;font-size:13px">
+    <option value="">All Towers</option>
+    <option value="A">Tower A</option>
+    <option value="B">Tower B</option>
+  </select>
+  <select id="cal-filter" style="width:auto;padding:8px 10px;font-size:13px">
+    <option value="all">All Units</option>
+    <option value="occupied">Occupied Only</option>
+    <option value="defaulters">Defaulters Only</option>
+  </select>
+  <button class="btn btn-primary" onclick="calLoad()">Load Calendar</button>
+</div>
+
+<div style="display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap;font-size:12px;align-items:center">
+  <span style="font-weight:700;color:var(--text-muted)">Legend:</span>
+  <span style="background:var(--c-verified-bg);color:var(--c-verified-fg);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">✓ Verified</span>
+  <span style="background:var(--c-pending-bg);color:var(--c-pending-fg);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">⏳ Pending</span>
+  <span style="background:var(--c-rejected-bg);color:var(--c-rejected-fg);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">✕ Rejected</span>
+  <span style="background:var(--bg-surface2);color:var(--text-muted);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">— Not Paid</span>
+</div>
+
+<div id="cal-container">
+  <div style="text-align:center;padding:40px;color:var(--text-muted)">
+    <div style="font-size:40px;margin-bottom:12px">📅</div>
+    <p>Select a month and click "Load Calendar"</p>
+  </div>
+</div>
+
+<script>
+var calUnits    = [];
+var calPayments = [];
+var calTenants  = [];
+
+(function() {
+  var now = new Date();
+  var el  = document.getElementById('cal-month');
+  if (el) el.value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+})();
+
+function calLoad() {
+  var month = document.getElementById('cal-month').value;
+  if (!month) { showToast('Please select a month','error'); return; }
+  document.getElementById('cal-container').innerHTML = loadingHtml('Building payment calendar…');
+
+  var uDone = false, pDone = false, tDone = false;
+  function tryRender() {
+    if (!uDone || !pDone || !tDone) return;
+    calRender(month);
+  }
+
+  google.script.run
+    .withSuccessHandler(function(r){ calUnits=(r&&r.data)||[]; uDone=true; tryRender(); })
+    .withFailureHandler(function(){ calUnits=[]; uDone=true; tryRender(); })
+    .doPost_internal('units.getAll', {});
+
+  google.script.run
+    .withSuccessHandler(function(r){ calPayments=(r&&r.data)||[]; pDone=true; tryRender(); })
+    .withFailureHandler(function(){ calPayments=[]; pDone=true; tryRender(); })
+    .doPost_internal('payments.getAll', { filters: { month: month } });
+
+  google.script.run
+    .withSuccessHandler(function(r){ calTenants=(r&&r.data)||[]; tDone=true; tryRender(); })
+    .withFailureHandler(function(){ calTenants=[]; tDone=true; tryRender(); })
+    .doPost_internal('tenants.getAll', {});
+}
+
+function calRender(month) {
+  var tower      = document.getElementById('cal-tower').value;
+  var filterMode = document.getElementById('cal-filter').value;
+
+  // Build payment lookup
+  var payLookup = {};
+  for (var i = 0; i < calPayments.length; i++) {
+    var p   = calPayments[i];
+    var key = p.payment_type + '|' + p.unit_id;
+    var pri = { 'Verified':3, 'Pending':2, 'Rejected':1 };
+    if (!payLookup[key] || (pri[p.status]||0) > (pri[payLookup[key].status]||0)) {
+      payLookup[key] = p;
+    }
+  }
+
+  // Build tenant lookup
+  var tenantLookup = {};
+  for (var i = 0; i < calTenants.length; i++) {
+    tenantLookup[calTenants[i].unit_id] = calTenants[i];
+  }
+
+  // Filter units
+  var units = calUnits.slice();
+  if (tower) {
+    var tmp = [];
+    for (var i = 0; i < units.length; i++) if (units[i].tower === tower) tmp.push(units[i]);
+    units = tmp;
+  }
+  if (filterMode === 'occupied') {
+    var tmp = [];
+    for (var i = 0; i < units.length; i++) if (units[i].status === 'Occupied') tmp.push(units[i]);
+    units = tmp;
+  }
+  if (filterMode === 'defaulters') {
+    var tmp = [];
+    for (var i = 0; i < units.length; i++) {
+      var u  = units[i];
+      if (u.status !== 'Occupied') continue;
+      var pm = payLookup['Maintenance|' + u.unit_id];
+      var pw = payLookup['Waste Management|' + u.unit_id];
+      if (!pm || pm.status !== 'Verified' || !pw || pw.status !== 'Verified') tmp.push(u);
+    }
+    units = tmp;
+  }
+
+  // Stats
+  var occupied  = 0, fullyPaid = 0;
+  for (var i = 0; i < units.length; i++) {
+    var u  = units[i];
+    if (u.status !== 'Occupied') continue;
+    occupied++;
+    var pm = payLookup['Maintenance|' + u.unit_id];
+    var pw = payLookup['Waste Management|' + u.unit_id];
+    if (pm && pm.status === 'Verified' && pw && pw.status === 'Verified') fullyPaid++;
+  }
+
+  var totalCollected = 0;
+  for (var i = 0; i < calPayments.length; i++) {
+    if (calPayments[i].status === 'Verified') totalCollected += Number(calPayments[i].amount || 0);
+  }
+
+  var stats =
+    '<div class="stats-grid" style="margin-bottom:20px">' +
+    '<div class="stat-card"><div class="stat-label">Units Shown</div><div class="stat-value">'+units.length+'</div></div>' +
+    '<div class="stat-card green"><div class="stat-label">Fully Paid</div><div class="stat-value">'+fullyPaid+'</div><div class="stat-sub">M + W verified</div></div>' +
+    '<div class="stat-card red"><div class="stat-label">Defaulters</div><div class="stat-value">'+(occupied-fullyPaid)+'</div><div class="stat-sub">of '+occupied+' occupied</div></div>' +
+    '<div class="stat-card gold"><div class="stat-label">Collected</div><div class="stat-value" style="font-size:18px">'+formatRupees(totalCollected)+'</div></div>' +
+    '</div>';
+
+  // Build table
+  var html = stats +
+    '<div class="card"><div class="card-header">' +
+      '<span class="card-title">📅 ' + formatMonth(month) + ' — Payment Status</span>' +
+      '<span style="font-size:11px;color:rgba(255,255,255,.5)">M=Maintenance · W=Waste · L=LPG</span>' +
+    '</div><div class="card-body" style="padding:0"><div class="table-wrap"><table><thead><tr>' +
+    '<th>Unit</th><th>Status</th><th>Tenant</th>' +
+    '<th style="text-align:center">M<br><span style="font-weight:400;font-size:10px">₹2,000</span></th>' +
+    '<th style="text-align:center">W<br><span style="font-weight:400;font-size:10px">₹170</span></th>' +
+    '<th style="text-align:center">L<br><span style="font-weight:400;font-size:10px">variable</span></th>' +
+    '<th style="text-align:center">Total</th><th>Action</th>' +
+    '</tr></thead><tbody>';
+
+  for (var i = 0; i < units.length; i++) {
+    var u  = units[i];
+    var tn = tenantLookup[u.unit_id];
+    var pm = payLookup['Maintenance|'      + u.unit_id];
+    var pw = payLookup['Waste Management|' + u.unit_id];
+    var pl = payLookup['LPG|'             + u.unit_id];
+
+    var totalPaid = 0;
+    for (var j = 0; j < calPayments.length; j++) {
+      if (calPayments[j].unit_id === u.unit_id && calPayments[j].status === 'Verified') {
+        totalPaid += Number(calPayments[j].amount || 0);
+      }
+    }
+
+    var isDefalt = u.status === 'Occupied' &&
+      (!pm || pm.status !== 'Verified' || !pw || pw.status !== 'Verified');
+
+    html += '<tr style="' + (isDefalt ? 'background:rgba(201,64,64,.04)' : '') + '">' +
+      '<td><strong>' + u.unit_id + '</strong></td>' +
+      '<td>' + pillStatus(u.status) + '</td>' +
+      '<td style="font-size:13px">' + (tn ? tn.name + '<br><span style="font-size:11px;color:var(--text-muted)">' + (tn.phone||'') + '</span>' : '<span style="color:var(--text-muted)">—</span>') + '</td>' +
+      '<td style="text-align:center">' + calPayCell(pm) + '</td>' +
+      '<td style="text-align:center">' + calPayCell(pw) + '</td>' +
+      '<td style="text-align:center">' + calPayCell(pl) + '</td>' +
+      '<td style="text-align:center"><strong>' + (totalPaid > 0 ? formatRupees(totalPaid) : '—') + '</strong></td>' +
+      '<td>' + (tn ?
+        '<button class="btn btn-sm btn-gold" onclick="calQuickPay(\'' + u.unit_id + '\',\'' + tn.tenant_id + '\',\'' + (tn.name||'').replace(/'/g,"\\'") + '\',\'' + month + '\')">+ Pay</button>'
+        : '') +
+      '</td></tr>';
+  }
+
+  html += '</tbody></table></div></div></div>';
+  document.getElementById('cal-container').innerHTML = html;
+}
+
+function calPayCell(p) {
+  if (!p) return '<span style="background:var(--bg-surface2);color:var(--text-muted);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;display:inline-block">—</span>';
+  var cfg = p.status === 'Verified' ? { bg:'var(--c-verified-bg)', fg:'var(--c-verified-fg)', icon:'✓' } :
+            p.status === 'Pending'  ? { bg:'var(--c-pending-bg)',  fg:'var(--c-pending-fg)',  icon:'⏳' } :
+                                      { bg:'var(--c-rejected-bg)', fg:'var(--c-rejected-fg)', icon:'✕' };
+  return '<span style="background:' + cfg.bg + ';color:' + cfg.fg + ';border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;display:inline-block">' +
+    cfg.icon + ' ' + formatRupees(p.amount) + '</span>';
+}
+
+function calQuickPay(unitId, tenantId, tenantName, month) {
+  openModal(
+    '<div class="modal-header"><span class="modal-title">💳 Record Payment — ' + unitId + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+    '<p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Tenant: <strong>' + tenantName + '</strong> | Month: <strong>' + formatMonth(month) + '</strong></p>' +
+    '<div class="form-row">' +
+      '<div class="form-group"><label>Payment Type</label>' +
+        '<select id="qp-type" onchange="calUpdateAmt()">' +
+          '<option value="Maintenance">Maintenance (₹2,000)</option>' +
+          '<option value="Waste Management">Waste Management (₹170)</option>' +
+          '<option value="LPG">LPG (Variable)</option>' +
+        '</select></div>' +
+      '<div class="form-group"><label>Amount (₹)</label><input id="qp-amount" type="number" value="2000" min="1"></div>' +
+    '</div>' +
+    '<div class="form-group"><label>Screenshot URL</label><input id="qp-screenshot" placeholder="Google Drive link"></div>' +
+    '<div class="form-group"><label>Notes</label><input id="qp-notes" placeholder="Optional"></div>' +
+    '<div class="form-actions">' +
+      '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+      '<button class="btn btn-gold" onclick="calSubmitPay(\'' + unitId + '\',\'' + tenantId + '\',\'' + month + '\')">Submit Payment</button>' +
+    '</div></div>'
+  );
+}
+
+function calUpdateAmt() {
+  var amounts = { 'Maintenance':2000, 'Waste Management':170, 'LPG':'' };
+  var t = document.getElementById('qp-type');
+  var a = document.getElementById('qp-amount');
+  if (t && a) a.value = amounts[t.value] !== undefined ? amounts[t.value] : '';
+}
+
+function calSubmitPay(unitId, tenantId, month) {
+  function gv(id) { var e=document.getElementById(id); return e?e.value.trim():''; }
+  var data = {
+    unit_id: unitId, tenant_id: tenantId, month: month,
+    payment_type:   gv('qp-type'),       amount:         gv('qp-amount'),
+    screenshot_url: gv('qp-screenshot'), notes:          gv('qp-notes')
+  };
+  if (!data.amount) { showToast('Amount is required','error'); return; }
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (r && r.success) {
+        showToast('Payment submitted!','success');
+        closeModalForce();
+        calLoad();
+        refreshPendingBadge();
+      } else { showToast((r&&r.error)||'Failed','error'); }
+    })
+    .withFailureHandler(function(e) { showToast('Error: '+e,'error'); })
+    .doPost_internal('payments.submit', data);
+}
+</script>

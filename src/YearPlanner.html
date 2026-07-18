@@ -1,0 +1,346 @@
+<!-- YearPlanner.html — CDOA Annual Calendar / Year Planner.
+     Reproduces the association's color-coded template as a computed,
+     rule-driven calendar; syncs to a dedicated Google Calendar; and
+     reminds EC Members ONLY (email automatic via daily trigger + a
+     one-click WhatsApp-ready message, since WhatsApp cannot be sent
+     programmatically without a paid Business API). -->
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">📅 Year Planner</h1>
+    <p class="page-subtitle">Recurring CDOA events — bills, meetings, contract renewals — with reminders to EC Members 1 month / 1 week / 1 day before</p>
+  </div>
+  <input type="number" id="yp-year" style="width:90px;padding:6px 10px;font-size:13px;" onchange="ypLoad()">
+  <button class="btn btn-outline btn-sm" onclick="ypManageRules()">⚙️ Manage Events</button>
+  <button class="btn btn-outline btn-sm" onclick="ypSyncCalendar()" id="yp-sync-btn">🔗 Sync to Google Calendar</button>
+  <button class="btn btn-outline btn-sm" onclick="ypLoad()">🔄 Refresh</button>
+</div>
+
+<div class="card" id="yp-reminders-card" style="display:none;">
+  <div class="card-header"><span class="card-title">🔔 Reminders Due Today</span></div>
+  <div class="card-body"><div id="yp-reminders-body"></div></div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div id="yp-status" style="margin-bottom:10px;"></div>
+    <div id="yp-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;"></div>
+    <div id="yp-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;"></div>
+  </div>
+</div>
+
+<script>
+var ypRules = [];
+var ypOcc = [];
+
+function ypE(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function ypShowStatus(msg, type) {
+  var el = document.getElementById('yp-status');
+  if (!el) return;
+  if (!msg) { el.innerHTML = ''; return; }
+  var bg = type === 'success' ? 'var(--c-verified-bg)' : type === 'error' ? 'var(--c-rejected-bg)' : 'var(--bg-surface2)';
+  var fg = type === 'success' ? 'var(--c-verified-fg)' : type === 'error' ? 'var(--c-rejected-fg)' : 'var(--text-secondary)';
+  el.innerHTML = '<div style="background:' + bg + ';color:' + fg + ';padding:8px 12px;border-radius:6px;font-size:12.5px;">' + msg + '</div>';
+}
+
+function ypLoad() {
+  var yearInput = document.getElementById('yp-year');
+  if (!yearInput.value) yearInput.value = new Date().getFullYear();
+  var year = Number(yearInput.value);
+
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { ypShowStatus('❌ ' + (r ? r.error : 'Failed'), 'error'); return; }
+    ypRules = r.data;
+    if (!ypRules.length) { ypRenderEmpty(); return; }
+    google.script.run.withSuccessHandler(function(r2) {
+      ypOcc = (r2 && r2.success) ? r2.data.occurrences : [];
+      ypRenderLegend();
+      ypRenderGrid(year);
+    }).withFailureHandler(function(e) { ypShowStatus('❌ ' + e, 'error'); })
+      .doPost_internal('planner.getOccurrences', { year: year });
+  }).withFailureHandler(function(e) { ypShowStatus('❌ ' + e, 'error'); })
+    .doPost_internal('planner.getAllRules', {});
+
+  ypLoadReminders();
+}
+
+function ypRenderEmpty() {
+  document.getElementById('yp-grid').innerHTML =
+    '<div style="grid-column:1/-1;background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:16px;font-size:13px;line-height:1.7;">' +
+    '<strong>No events yet.</strong> Load the 13 recurring events reproduced from the association\'s own Calendar/Year Planner template:<br><br>' +
+    '<button class="btn btn-accent btn-sm" onclick="ypSeed()">📥 Load Initial Events</button></div>';
+  document.getElementById('yp-legend').innerHTML = '';
+}
+
+function ypSeed() {
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Loaded ' + r.data.rules + ' events', 'success'); ypLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('planner.seed', {});
+}
+
+function ypRenderLegend() {
+  var h = '';
+  ypRules.filter(function(r) { return r.active; }).forEach(function(r) {
+    h += '<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;background:var(--bg-surface2);padding:4px 8px;border-radius:12px;">' +
+      '<span style="width:11px;height:11px;border-radius:3px;background:' + r.color + ';display:inline-block;border:1px solid rgba(128,128,128,.3);"></span>' + ypE(r.title) + '</span>';
+  });
+  document.getElementById('yp-legend').innerHTML = h;
+}
+
+function ypRenderGrid(year) {
+  var mnFull = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var byMonth = {};
+  ypOcc.forEach(function(o) {
+    var m = Number(o.date.slice(5, 7));
+    (byMonth[m] = byMonth[m] || []).push(o);
+  });
+
+  var h = '';
+  for (var m = 1; m <= 12; m++) {
+    var first = new Date(year, m - 1, 1);
+    var startDow = first.getDay();
+    var dim = new Date(year, m, 0).getDate();
+    var dayEvents = {};
+    (byMonth[m] || []).forEach(function(o) { var d = Number(o.date.slice(8, 10)); (dayEvents[d] = dayEvents[d] || []).push(o); });
+
+    var cells = '';
+    for (var pad = 0; pad < startDow; pad++) cells += '<div></div>';
+    for (var d = 1; d <= dim; d++) {
+      var evs = dayEvents[d] || [];
+      var bg = evs.length ? evs[0].color : 'transparent';
+      var title = evs.length ? evs.map(function(e) { return e.title; }).join(' + ') : '';
+      cells += '<div style="text-align:center;font-size:11px;padding:3px 0;border-radius:4px;' +
+        (evs.length ? 'background:' + bg + ';color:' + (ypIsLight(bg) ? '#000' : '#fff') + ';font-weight:700;cursor:pointer;' : 'color:var(--text-muted);') + '"' +
+        (evs.length ? ' title="' + ypE(title) + '" onclick="ypShowDay(' + year + ',' + m + ',' + d + ')"' : '') + '>' + d + '</div>';
+    }
+
+    h += '<div style="border:1px solid var(--border,rgba(128,128,128,.3));border-radius:8px;padding:10px;">' +
+      '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">' + mnFull[m-1] + ' ' + year + '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:10px;color:var(--text-muted);text-align:center;margin-bottom:3px;">' +
+        '<div>S</div><div>M</div><div>T</div><div>W</div><div>T</div><div>F</div><div>S</div></div>' +
+      '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">' + cells + '</div>' +
+    '</div>';
+  }
+  document.getElementById('yp-grid').innerHTML = h;
+}
+
+function ypIsLight(hex) {
+  if (!hex || hex.charAt(0) !== '#') return false;
+  var r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return (r*299 + g*587 + b*114) / 1000 > 150;
+}
+
+function ypShowDay(year, month, day) {
+  var ds = year + '-' + (month<10?'0'+month:month) + '-' + (day<10?'0'+day:day);
+  var evs = ypOcc.filter(function(o) { return o.date === ds; });
+  if (!evs.length) return;
+  var h = '<div class="modal-header"><span class="modal-title">📅 ' + ds + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">';
+  evs.forEach(function(e) {
+    h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+      '<span style="width:14px;height:14px;border-radius:3px;background:' + e.color + ';display:inline-block;flex-shrink:0;"></span>' +
+      '<div><strong>' + ypE(e.title) + '</strong>' + (e.notes ? '<div style="font-size:11.5px;color:var(--text-muted);">' + ypE(e.notes) + '</div>' : '') + '</div></div>';
+  });
+  h += '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Close</button></div></div>';
+  openModal(h);
+}
+
+// ── Reminders due today ──
+function ypLoadReminders() {
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) return;
+    var d = r.data;
+    var card = document.getElementById('yp-reminders-card');
+    var body = document.getElementById('yp-reminders-body');
+    if (!d.due.length) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    if (!d.ecEmails.length) {
+      body.innerHTML = '<div style="color:#f59e0b;font-size:12.5px;margin-bottom:8px;">⚠️ No current EC Member has an email on file — add one on the EC Committee page for automatic reminders to work.</div>';
+    }
+    var h = '';
+    d.due.forEach(function(item) {
+      h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border,rgba(128,128,128,.3));border-radius:8px;padding:8px 12px;margin-bottom:6px;">' +
+        '<span style="width:12px;height:12px;border-radius:3px;background:' + item.color + ';display:inline-block;flex-shrink:0;"></span>' +
+        '<strong>' + ypE(item.title) + '</strong>' +
+        '<span style="font-size:12px;color:var(--text-muted);">' + item.event_date + ' · ' + item.stage_label + '</span>' +
+        '<span style="margin-left:auto;"></span>' +
+        (item.emailSent ? '<span class="pill" style="background:rgba(16,185,129,.15);color:#10b981;font-size:10.5px;">✓ Email sent</span>' :
+          '<button class="btn btn-xs btn-accent" onclick="ypSendEmail(\'' + item.rule_id + '\',\'' + item.event_date + '\',\'' + item.stage + '\')">📧 Send Email</button>') +
+        (item.whatsappSent ? '<span class="pill" style="background:rgba(16,185,129,.15);color:#10b981;font-size:10.5px;">✓ WhatsApp sent</span>' :
+          '<button class="btn btn-xs btn-outline" onclick="ypSendWhatsapp(\'' + item.rule_id + '\',\'' + item.event_date + '\',\'' + item.stage + '\')">📱 Send via WhatsApp</button>') +
+      '</div>';
+    });
+    body.innerHTML = h + '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Reminders go to current EC Members only. Email sends automatically once a day (needs the one-time trigger — see ⚙️ Manage Events). WhatsApp opens a pre-filled message for you to send with one tap — there\'s no free way for a program to send WhatsApp messages directly.</div>';
+  }).withFailureHandler(function() {}).doPost_internal('planner.getDueReminders', {});
+}
+
+function ypSendEmail(ruleId, date, stage) {
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Email sent to ' + r.data.recipients + ' EC member(s)', 'success'); ypLoadReminders(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('planner.sendReminderNow', { rule_id: ruleId, event_date: date, stage: stage });
+}
+
+function ypSendWhatsapp(ruleId, date, stage) {
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { showToast((r && r.error) || 'Failed', 'error'); return; }
+    window.open(r.data.url, '_blank');
+    google.script.run.doPost_internal('planner.markWhatsappSent', { rule_id: ruleId, event_date: date, stage: stage });
+    setTimeout(ypLoadReminders, 800);
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('planner.whatsappMessage', { rule_id: ruleId, event_date: date, stage: stage });
+}
+
+// ── Manage Events (rule CRUD) ──
+function ypManageRules() {
+  var h = '<div class="modal-header"><span class="modal-title">⚙️ Manage Events</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">' +
+    '<div style="background:var(--bg-surface2);border-radius:6px;padding:10px 12px;font-size:11.5px;margin-bottom:12px;line-height:1.6;">' +
+    '<strong>Automatic email reminders — one-time setup:</strong> In the Apps Script editor, open <strong>Triggers</strong> (clock icon) → <strong>+ Add Trigger</strong> → function <code>sendDuePlannerReminders</code> → Time-driven → Day timer → any time → Save. After that, reminders email themselves daily with no further action.</div>';
+  h += '<button class="btn btn-sm btn-accent" onclick="closeModalForce();ypOpenAddRule();" style="margin-bottom:10px;">➕ Add Event</button>';
+  h += '<div class="table-wrap" style="max-height:400px;overflow:auto;"><table class="forms-table"><thead><tr><th></th><th>Event</th><th>Pattern</th><th style="width:80px;">Actions</th></tr></thead><tbody>';
+  ypRules.forEach(function(r) {
+    h += '<tr' + (r.active ? '' : ' style="opacity:.5;"') + '>' +
+      '<td><span style="width:12px;height:12px;border-radius:3px;background:' + r.color + ';display:inline-block;"></span></td>' +
+      '<td style="font-weight:600;">' + ypE(r.title) + (r.active ? '' : ' <span style="font-size:10px;">(inactive)</span>') + '</td>' +
+      '<td style="font-size:11px;color:var(--text-muted);">' + ypE(r.notes) + '</td>' +
+      '<td style="white-space:nowrap;"><button class="btn btn-xs btn-outline" onclick="closeModalForce();ypOpenEditRule(\'' + r.rule_id + '\')">✏️</button> ' +
+      '<button class="btn btn-xs btn-outline" style="color:var(--c-rejected-fg);" onclick="ypDeleteRule(\'' + r.rule_id + '\',\'' + ypE(r.title) + '\')">🗑</button></td></tr>';
+  });
+  h += '</tbody></table></div><div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Close</button></div></div>';
+  openModal(h);
+}
+
+function ypRuleTypeFields(rule) {
+  rule = rule || {};
+  var t = rule.rule_type || 'annual_date';
+  var p = rule.params || {};
+  var opts = ['annual_date','specific_months_day','monthly_last_day','monthly_last_weekday','one_off_date'];
+  var labels = { annual_date:'Fixed date every year', specific_months_day:'A specific day, in chosen months', monthly_last_day:'Last day of every month (Sunday→Saturday)', monthly_last_weekday:'Last Sunday of every month', one_off_date:'One-off (specific year, does not repeat)' };
+  var sel = '<div class="form-group"><label>Pattern</label><select id="ypf-type" onchange="ypRenderTypeParams()">' +
+    opts.map(function(o) { return '<option value="'+o+'"'+(o===t?' selected':'')+'>'+labels[o]+'</option>'; }).join('') + '</select></div>';
+  return sel + '<div id="ypf-params"></div>';
+}
+
+function ypRenderTypeParams(existingParams) {
+  var t = document.getElementById('ypf-type').value;
+  var p = existingParams || {};
+  var el = document.getElementById('ypf-params');
+  var h = '';
+  if (t === 'annual_date') {
+    h = '<div class="form-row"><div class="form-group"><label>Month (1-12)</label><input id="ypf-month" type="number" min="1" max="12" value="' + (p.month||1) + '"></div>' +
+      '<div class="form-group"><label>Day</label><input id="ypf-day" type="number" min="1" max="31" value="' + (p.day||1) + '"></div></div>';
+  } else if (t === 'one_off_date') {
+    h = '<div class="form-row"><div class="form-group"><label>Year</label><input id="ypf-year" type="number" value="' + (p.year||new Date().getFullYear()) + '"></div>' +
+      '<div class="form-group"><label>Month (1-12)</label><input id="ypf-month" type="number" min="1" max="12" value="' + (p.month||1) + '"></div>' +
+      '<div class="form-group"><label>Day</label><input id="ypf-day" type="number" min="1" max="31" value="' + (p.day||1) + '"></div></div>';
+  } else if (t === 'specific_months_day') {
+    h = '<div class="form-group"><label>Day of month</label><input id="ypf-day" type="number" min="1" max="31" value="' + (p.day||1) + '"></div>' +
+      '<div class="form-group"><label>Months (comma-separated, 1-12)</label><input id="ypf-months" type="text" value="' + ((p.months||[]).join(',')) + '" placeholder="e.g. 2,4,6,8,10,12"></div>';
+  } else if (t === 'monthly_last_weekday') {
+    h = '<div class="form-group"><label>Weekday</label><select id="ypf-weekday">' +
+      ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(function(d,i) { return '<option value="'+i+'"'+(i===(p.weekday||0)?' selected':'')+'>'+d+'</option>'; }).join('') + '</select></div>';
+  } else {
+    h = '<div style="font-size:11.5px;color:var(--text-muted);">No extra parameters — this fires on the last calendar day of every month.</div>';
+  }
+  el.innerHTML = h;
+}
+
+function ypReadRuleParams() {
+  var t = document.getElementById('ypf-type').value;
+  if (t === 'annual_date') return { month: Number(document.getElementById('ypf-month').value), day: Number(document.getElementById('ypf-day').value) };
+  if (t === 'one_off_date') return { year: Number(document.getElementById('ypf-year').value), month: Number(document.getElementById('ypf-month').value), day: Number(document.getElementById('ypf-day').value) };
+  if (t === 'specific_months_day') return { day: Number(document.getElementById('ypf-day').value), months: document.getElementById('ypf-months').value.split(',').map(function(s){return Number(s.trim());}).filter(function(n){return n>=1&&n<=12;}) };
+  if (t === 'monthly_last_weekday') return { weekday: Number(document.getElementById('ypf-weekday').value) };
+  return {};
+}
+
+function ypOpenAddRule() {
+  openModal('<div class="modal-header"><span class="modal-title">➕ Add Event</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">' +
+    '<div class="form-group"><label>Title</label><input id="ypf-title" type="text" style="width:100%;"></div>' +
+    '<div class="form-group"><label>Color</label><input id="ypf-color" type="color" value="#64748b"></div>' +
+    ypRuleTypeFields(null) +
+    '<div class="form-group"><label>Notes</label><input id="ypf-notes" type="text" style="width:100%;"></div>' +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce();ypManageRules();">Cancel</button>' +
+    '<button class="btn btn-accent" onclick="ypSaveNewRule()">💾 Add</button></div></div>');
+  ypRenderTypeParams();
+}
+
+function ypSaveNewRule() {
+  var title = document.getElementById('ypf-title').value.trim();
+  if (!title) { showToast('Title is required', 'error'); return; }
+  var d = { title: title, color: document.getElementById('ypf-color').value, rule_type: document.getElementById('ypf-type').value,
+            params: ypReadRuleParams(), notes: document.getElementById('ypf-notes').value.trim() };
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Event added', 'success'); closeModalForce(); ypLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('planner.addRule', d);
+}
+
+function ypOpenEditRule(id) {
+  var r = null;
+  ypRules.forEach(function(x) { if (x.rule_id === id) r = x; });
+  if (!r) return;
+  openModal('<div class="modal-header"><span class="modal-title">✏️ Edit — ' + ypE(r.title) + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">' +
+    '<div class="form-group"><label>Title</label><input id="ypf-title" type="text" value="' + ypE(r.title) + '" style="width:100%;"></div>' +
+    '<div class="form-group"><label>Color</label><input id="ypf-color" type="color" value="' + r.color + '"></div>' +
+    ypRuleTypeFields(r) +
+    '<div class="form-group"><label>Notes</label><input id="ypf-notes" type="text" value="' + ypE(r.notes) + '" style="width:100%;"></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><input type="checkbox" id="ypf-active"' + (r.active?' checked':'') + '><label for="ypf-active" style="margin:0;font-weight:400;">Active</label></div>' +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce();ypManageRules();">Cancel</button>' +
+    '<button class="btn btn-accent" onclick="ypSaveEditRule(\'' + id + '\')">💾 Save</button></div></div>');
+  ypRenderTypeParams(r.params);
+}
+
+function ypSaveEditRule(id) {
+  var d = { rule_id: id, title: document.getElementById('ypf-title').value.trim(), color: document.getElementById('ypf-color').value,
+            rule_type: document.getElementById('ypf-type').value, params: ypReadRuleParams(),
+            notes: document.getElementById('ypf-notes').value.trim(), active: document.getElementById('ypf-active').checked };
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Saved', 'success'); closeModalForce(); ypLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('planner.updateRule', d);
+}
+
+function ypDeleteRule(id, title) {
+  if (!confirm('Delete "' + title + '" from the Year Planner? This removes the recurring rule — past reminder history is unaffected.')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Deleted', 'success'); ypManageRules(); ypLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('planner.deleteRule', { rule_id: id });
+}
+
+// ── Google Calendar sync ──
+function ypSyncCalendar() {
+  var year = Number((document.getElementById('yp-year')||{}).value) || new Date().getFullYear();
+  var btn = document.getElementById('yp-sync-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Syncing…'; }
+  ypShowStatus('⏳ Syncing ' + year + ' to Google Calendar…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    if (btn) { btn.disabled = false; btn.textContent = '🔗 Sync to Google Calendar'; }
+    if (!r || !r.success) { ypShowStatus('❌ ' + (r ? r.error : 'Failed'), 'error'); return; }
+    var d = r.data;
+    ypShowStatus('✓ Synced — ' + d.created + ' created, ' + d.updated + ' updated' + (d.failed ? ', ' + d.failed + ' failed' : '') +
+      '. Calendar: <strong>' + ypE(d.calendarName) + '</strong>. To view it: Google Calendar → Settings → find "' + ypE(d.calendarName) + '" under your calendars, or share it with EC Members from there.', 'success');
+  }).withFailureHandler(function(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '🔗 Sync to Google Calendar'; }
+    ypShowStatus('❌ Error: ' + e, 'error');
+  }).doPost_internal('planner.syncCalendar', { year: year });
+}
+
+function yearPlannerPageInit() { ypLoad(); }
+</script>
+

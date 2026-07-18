@@ -1,0 +1,972 @@
+<!-- Settings.html — Application Settings Page -->
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">⚙️ Settings</h1>
+    <p class="page-subtitle">Configure fees, association details, notifications and more</p>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <button class="btn btn-outline btn-sm" onclick="settingsLoad()">↻ Reload</button>
+    <button class="btn btn-accent" id="settings-save-btn" onclick="settingsSaveAll()">💾 Save All Settings</button>
+  </div>
+</div>
+
+<!-- Save status banner -->
+<div id="settings-status" style="margin-bottom:16px;"></div>
+
+<!-- Same collapsible settings-group shell as every other section on this
+     page (they render into #settings-content below); this one is static
+     because the theme is a per-browser preference, not server data. -->
+<div class="settings-group" id="sg-appearance">
+  <div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">🎨</div>Appearance</span><span class="settings-toggle-chevron">−</span></div>
+  <div style="padding:14px 20px;">
+    <div class="theme-toggle-wrap" style="max-width:320px;gap:12px;">
+      <span class="theme-icon" id="theme-icon-label">🌙</span>
+      <span class="theme-label" id="theme-text-label">Dark mode</span>
+      <label class="theme-toggle" title="Toggle dark/light mode">
+        <input type="checkbox" id="theme-checkbox" onchange="toggleTheme(this)">
+        <span class="theme-toggle-track"></span>
+      </label>
+    </div>
+    <div style="font-size:11.5px;color:var(--text-muted);margin-top:8px;">This is a per-browser preference — moved here so only Administrators can change it. Dark mode is OXYGEN's default for everyone else.</div>
+  </div>
+</div>
+
+<!-- Settings content -->
+<div id="settings-content">
+  <div class="loading"><div class="spinner"></div> Loading settings…</div>
+</div>
+
+<style>
+  /* Collapsible sections: click the header to expand/collapse. Collapsed by
+     default so the page starts short; a chevron shows the current state. */
+  .settings-group-head { cursor:pointer;display:flex;align-items:center;justify-content:space-between; }
+  .settings-toggle-chevron { font-size:16px;font-weight:800;color:var(--text-muted);flex-shrink:0;width:20px;text-align:center; }
+  .settings-group.collapsed > *:not(.settings-group-head) { display:none !important; }
+  .dz-block { border-top: 1px dashed var(--border); padding: 10px 4px; }
+  .dz-block:first-of-type { border-top: none; }
+  .dz-block.dz-danger { background: var(--c-rejected-bg); border-radius: 8px; padding: 10px 12px; margin-top: 8px; }
+  .dz-body { padding-top: 10px; }
+  .dz-title { font-weight: 700; font-size: 13px; }
+  .dz-desc { font-size: 11.5px; color: var(--text-muted); margin-bottom: 10px; }
+  .dz-month-table table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  .dz-month-table th, .dz-month-table td { border: 1px solid var(--border); padding: 5px 9px; }
+  .dz-month-table th { background: var(--bg-surface2); font-weight: 700; font-size: 11px; text-align: left; }
+  .settings-table { border-collapse: collapse; width: 100%; margin-bottom: 4px; }
+  .settings-table th, .settings-table td { border: 1px solid var(--border); padding: 7px 10px; font-size: 12.5px; text-align: left; }
+  .settings-table th { background: var(--bg-surface2); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: var(--text-muted); }
+  .settings-table tr:hover td { background: rgba(0,200,150,.05); }
+
+  /* Category row pencils — visible only on row hover, same interaction as
+     the LPG Readings and Bank Statement pages. */
+  .cat-row .edit-pencil { opacity:0;transition:opacity .12s;font-size:12px;filter:grayscale(.3); }
+  .cat-row:hover .edit-pencil { opacity:.55; }
+  .cat-row .edit-pencil:hover { opacity:1 !important; }
+  .settings-group {
+    background: var(--bg-surface);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .settings-group-head {
+    padding: 13px 20px;
+    background: var(--bg-surface2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--text-primary);
+    letter-spacing: -0.1px;
+  }
+  .settings-group-icon {
+    width: 28px; height: 28px;
+    border-radius: 7px;
+    background: var(--accent-dim);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+  .settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  @media(max-width:700px) { .settings-grid { grid-template-columns: 1fr; } }
+
+  .settings-field {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+  .settings-field:nth-child(even) { border-right: none; }
+  .settings-field.full-width { grid-column: 1 / -1; border-right: none; }
+  .settings-field:last-child,
+  .settings-field:nth-last-child(2):nth-child(odd) { border-bottom: none; }
+
+  .settings-field label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 5px;
+    display: block;
+  }
+  .settings-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  .settings-field input,
+  .settings-field textarea,
+  .settings-field select {
+    width: 100%;
+    padding: 8px 11px;
+    border: 1.5px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 13.5px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .settings-field input:focus,
+  .settings-field textarea:focus,
+  .settings-field select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0,200,150,0.12);
+  }
+  .settings-field textarea { resize: vertical; min-height: 70px; }
+
+  .settings-field input[type="number"] { font-variant-numeric: tabular-nums; }
+
+  .fee-preview {
+    display: inline-block;
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 9px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+
+  #settings-status div {
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+  }
+</style>
+
+<script>
+var settingsData = {};
+
+var settingsGroupIcons = {
+  'Payment Fees':       '💰',
+  'Community Forms':    '📋',
+  'Documents':          '📁',
+  'Payment Screenshots': '📸'
+};
+
+function settingsPageInit() {
+  settingsLoad();
+}
+
+function settingsLoad() {
+  document.getElementById('settings-content').innerHTML = loadingHtml('Loading settings…');
+  document.getElementById('settings-status').innerHTML  = '';
+
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (!r || !r.success) {
+        document.getElementById('settings-content').innerHTML =
+          '<div style="color:var(--c-rejected-fg);padding:20px">Error: ' + (r && r.error || 'Failed') + '</div>';
+        return;
+      }
+      settingsRender(r.data || []);
+    })
+    .withFailureHandler(function(e) {
+      document.getElementById('settings-content').innerHTML =
+        '<div style="color:var(--c-rejected-fg);padding:20px">Error: ' + e + '</div>';
+    })
+    .doPost_internal('settings.getAll', {});
+}
+
+// Builds one collapsible Danger Zone sub-section — collapsed by default,
+// "+" to expand, matching the same interaction as the outer settings
+// groups. `danger` adds the extra red emphasis for the nuclear option.
+function dzBlock(id, icon, title, desc, bodyHtml, danger) {
+  return '<div class="dz-block' + (danger ? ' dz-danger' : '') + '">' +
+    '<div class="dz-title" onclick="dzToggleBlock(this)" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;' + (danger ? 'color:var(--c-rejected-fg);' : '') + '">' +
+      '<span>' + icon + ' ' + title + '</span><span class="settings-toggle-chevron">+</span>' +
+    '</div>' +
+    '<div class="dz-body" style="display:none;">' +
+      (desc ? '<div class="dz-desc">' + desc + '</div>' : '') +
+      bodyHtml +
+    '</div></div>';
+}
+
+function dzToggleBlock(titleEl) {
+  var body = titleEl.nextElementSibling;
+  var chev = titleEl.querySelector('.settings-toggle-chevron');
+  if (!body) return;
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if (chev) chev.textContent = open ? '+' : '−';
+}
+
+function settingsRender(schema) {
+  // Group fields
+  var groups   = [];
+  var groupMap = {};
+  for (var i = 0; i < schema.length; i++) {
+    var s = schema[i];
+    if (!groupMap[s.group]) {
+      groupMap[s.group] = [];
+      groups.push(s.group);
+    }
+    groupMap[s.group].push(s);
+    settingsData[s.key] = s.value;
+  }
+
+  var html = '';
+
+  // Universal Active Year — the single, whole-app "which year are we
+  // working in" setting. Shown as a read-only banner on the Dashboard;
+  // changed only from here, since it affects every user and every page.
+  html += '<div class="settings-group collapsed" id="sg-activeyear">'+
+    '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">🌐</div>Universal Active Year</span>'+
+    '<span class="settings-toggle-chevron">+</span></div>'+
+    '<div style="font-size:12px;color:var(--text-muted);padding:0 4px 10px;">The year the whole app is focused on by default — shown on the Dashboard for everyone. Editing any OTHER year still works for Administrators, with one confirmation prompt each time; everyone else can view other years but not edit them.</div>'+
+    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">'+
+      '<span style="font-size:13px;">Currently:</span>'+
+      '<strong id="ay-current" style="font-size:16px;color:var(--accent);">…</strong>'+
+      '<select id="ay-select" style="padding:7px 10px;font-size:13px;margin-left:12px;"></select>'+
+      '<button class="btn btn-accent btn-sm" onclick="ayApply()">Set as Active Year</button>'+
+    '</div>'+
+    '</div>';
+
+  for (var g = 0; g < groups.length; g++) {
+    var groupName   = groups[g];
+    var fields      = groupMap[groupName];
+    var icon        = settingsGroupIcons[groupName] || '⚙️';
+
+    var gid = 'sg-' + g;
+    html += '<div class="settings-group collapsed" id="' + gid + '">';
+    html += '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">' + icon + '</div>' + groupName + '</span><span class="settings-toggle-chevron">+</span></div>';
+    html += '<div class="settings-grid">';
+
+    for (var i = 0; i < fields.length; i++) {
+      var f   = fields[i];
+      var isTA = f.type === 'textarea';
+      html += '<div class="settings-field' + (isTA ? ' full-width' : '') + '">';
+      html += '<label for="sf-' + f.key + '">' + f.label + '';
+
+      // Fee preview badge
+      if (f.group === 'Payment Fees' && f.value) {
+        html += '<span class="fee-preview">₹' + Number(f.value).toLocaleString('en-IN') + '/month</span>';
+      }
+      html += '</label>';
+
+      if (f.type === 'textarea') {
+        html += '<textarea id="sf-' + f.key + '" oninput="settingsFieldChange(\'' + f.key + '\')">' + settingsEsc(f.value) + '</textarea>';
+      } else {
+        html += '<input id="sf-' + f.key + '" type="' + (f.type === 'password' ? 'text' : f.type === 'email' ? 'email' : f.type === 'number' ? 'number' : 'text') + '" ' +
+          'value="' + settingsEsc(f.value) + '" ' +
+          'placeholder="' + settingsEsc(f.hint || f.label) + '" ' +
+          'oninput="settingsFieldChange(\'' + f.key + '\')">';
+      }
+
+      if (f.hint) html += '<div class="settings-hint">' + f.hint + '</div>';
+      html += '</div>';
+    }
+
+    html += '</div></div>';
+  }
+
+  // User Administration (admins only see this page at all)
+  html += '<div class="settings-group collapsed" id="sg-useradmin">'+
+    '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">👥</div>User Administration</span><span class="settings-toggle-chevron">+</span></div>'+
+    '<div style="font-size:12px;color:var(--text-muted);padding:0 4px 10px;">People sign in with their Google account; their role decides what they can see and do. Administrators see everything; Users cannot open Settings or Data Imports. <strong>Note:</strong> on this personal (non-Workspace) deployment, Google only reveals the OWNER\'s email to the app — every other Google account is otherwise indistinguishable to it. Setting a PIN below (🔑) lets a specific person be recognized correctly, Admin or User, without relying on Google to reveal who they are.</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'+
+      '<input id="ua-email" placeholder="new.user@gmail.com" style="padding:8px 11px;font-size:13px;min-width:220px;">'+
+      '<input id="ua-name" placeholder="Name (optional)" style="padding:8px 11px;font-size:13px;min-width:150px;">'+
+      '<select id="ua-role" style="padding:8px 10px;font-size:13px;"><option value="user">User</option><option value="admin">Administrator</option></select>'+
+      '<button class="btn btn-accent btn-sm" onclick="uaAdd()">+ Add User</button>'+
+    '</div>'+
+    '<div id="ua-list"><div class="loading"><div class="spinner"></div></div></div>'+
+    '</div>';
+
+  // LPG Rate History — the rate in effect for a given month, so past
+  // readings never recalculate when today's market rate changes.
+  html += '<div class="settings-group collapsed" id="sg-lpgrate">'+
+    '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">🔥</div>LPG Rate History</span><span class="settings-toggle-chevron">+</span></div>'+
+    '<div style="font-size:12px;color:var(--text-muted);padding:0 4px 10px;">Set the LPG rate effective from a given month onward (e.g. when the market price changes). Each reading keeps the rate that was in effect for its own month — changing today\'s rate never alters past calculations.</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'+
+      '<select id="lr-year" style="padding:8px 10px;font-size:13px;"></select>'+
+      '<select id="lr-month" style="padding:8px 10px;font-size:13px;">'+
+        '<option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option><option value="4">Apr</option>'+
+        '<option value="5">May</option><option value="6">Jun</option><option value="7">Jul</option><option value="8">Aug</option>'+
+        '<option value="9">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>'+
+      '</select>'+
+      '<input id="lr-conv" type="number" step="0.01" placeholder="Conv. Factor" value="2.6" style="width:110px;padding:8px 10px;font-size:13px;">'+
+      '<input id="lr-price" type="number" step="0.01" placeholder="Price per Kg (₹)" style="width:140px;padding:8px 10px;font-size:13px;">'+
+      '<button class="btn btn-accent btn-sm" onclick="lrSet()">+ Set Rate</button>'+
+    '</div>'+
+    '<div id="lr-list"><div class="loading"><div class="spinner"></div></div></div>'+
+    '</div>';
+
+  // Expense Category Auto-Match Patterns — recurring monthly payments
+  // (security, housekeeping, a specific vendor) often share a recognizable
+  // piece of text in their bank narration every time. Define that text
+  // here once, and every matching debit — on import, and on every future
+  // "Auto-Categorize Expenses" run on the Bank Statement page — gets that
+  // Expense Category applied automatically, with no per-transaction work.
+  html += '<div class="settings-group collapsed" id="sg-exppatterns">'+
+    '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">🏷️</div>Expense Category Auto-Match Patterns</span>'+
+    '<span class="settings-toggle-chevron">+</span></div>'+
+    '<div style="font-size:12px;color:var(--text-muted);padding:0 4px 10px;">Recurring monthly payments often have a recognizable pattern — the same text in the bank narration (a security company, housekeeping contractor, "KSEB", "KWA"), the same exact amount every time (a cylinder delivery that\'s always ₹9,120, even though the reference number is random), or both. Fill in either field, or both for extra precision — a rule needs at least one to be useful. Applied automatically on import, and any time you click "🏷️ Auto-Categorize Expenses" on the Bank Statement page. If a payment matches more than one rule, the first one in this list wins.</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'+
+      '<input id="ep-pattern" placeholder="Narration text, e.g. SECURITY SERVICES or KSEB (optional)" style="flex:1;min-width:220px;padding:8px 10px;font-size:13px;">'+
+      '<input id="ep-amount" type="number" step="0.01" placeholder="Exact amount (optional)" style="width:160px;padding:8px 10px;font-size:13px;">'+
+      '<select id="ep-category" style="padding:8px 10px;font-size:13px;"><option value="">Loading categories…</option></select>'+
+      '<button class="btn btn-accent btn-sm" onclick="epAdd()">+ Add Pattern</button>'+
+    '</div>'+
+    '<div id="ep-list"><div class="loading"><div class="spinner"></div></div></div>'+
+    '</div>';
+
+  // Custom editable-list sections (not schema-driven): render placeholders,
+  // then load their rows from the Categories service. Positioned just above
+  // the Danger Zone — they take real estate but aren't touched often, so
+  // the more frequently-used settings above stay within easy reach.
+  html += '<div class="settings-group collapsed" id="cat-credit-group">'+
+            '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">💰</div>Fee Categories (Money Received)</span><span class="settings-toggle-chevron">+</span></div>'+
+            '<div style="font-size:12px;color:var(--text-muted);padding:0 4px 10px">Types of fees the association receives. Used on the Fees Received page and to classify credits.</div>'+
+            '<div id="cat-credit-list"><div class="loading"><div class="spinner"></div></div></div>'+
+          '</div>';
+  html += '<div class="settings-group collapsed" id="cat-debit-group">'+
+            '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">💸</div>Expense Categories (Payments Made)</span><span class="settings-toggle-chevron">+</span></div>'+
+            '<div style="font-size:12px;color:var(--text-muted);padding:0 4px 10px">Categories of payments the association makes. Used on the Transaction Ledger to classify debits.</div>'+
+            '<div id="cat-debit-list"><div class="loading"><div class="spinner"></div></div></div>'+
+          '</div>';
+
+  // Danger zone — every destructive action lives here, admin-only. Each
+  // sub-section is ALSO individually collapsible (collapsed by default),
+  // since even one expanded Danger Zone can get very long.
+  html += '<div class="settings-group collapsed" id="sg-danger" style="border:1.5px solid var(--c-rejected-fg);">'+
+    '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">⚠️</div>Danger Zone</span><span class="settings-toggle-chevron">+</span></div>'+
+    '<div style="font-size:12px;color:var(--text-muted);padding:0 4px 14px;">Every action below is destructive. Take a full backup first if there is any doubt.</div>'+
+
+    dzBlock('sg-danger-backup', '💾', 'Full Database Backup',
+      'Downloads one file containing every sheet OXYGEN manages — Units, Owners, Tenants, Payments, Bank Statement, LPG Readings & Inventory, Settings, Categories and Users. Keep this file somewhere safe before doing anything else in this section.',
+      '<button class="btn btn-accent btn-sm" onclick="dzExportBackup()">⬇ Download Full Backup</button>') +
+
+    dzBlock('sg-danger-restore', '📤', 'Restore from Backup',
+      'Rebuilds every sheet in the backup file EXACTLY as it was when exported — overwriting whatever is currently in those sheets. This is the way back if the actions below go further than intended.',
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'+
+        '<input type="file" id="dz-restore-file" accept=".json" style="font-size:12px;">'+
+        '<button class="btn btn-outline btn-sm" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="dzRestoreBackup()">📤 Restore This File</button>'+
+      '</div>'+
+      '<div id="dz-restore-status" style="margin-top:8px;"></div>') +
+
+    dzBlock('sg-danger-bank', '🏦', 'Delete Bank Statement Data by Month',
+      'Removes every Transaction Ledger row for one month only, so it can be re-imported cleanly. Since Fees Received payments are posted FROM the bank statement, deleting a month here automatically deletes that same month\'s Fees Received records too — the two never end up disagreeing. Grouped by year — new years appear automatically as data for them exists.',
+      '<div id="dz-bank-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-bank-months-status" style="margin-top:8px;"></div>') +
+
+    dzBlock('sg-danger-bank2', '🔥', 'Delete IOB LPG Account Data by Month',
+      'Same as above, but for the second bank account (IOB LPG) — removes that account\'s Transaction Ledger rows for one month, including any Fees Received records posted from them, so the month can be re-imported cleanly.',
+      '<div id="dz-bank2-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-bank2-months-status" style="margin-top:8px;"></div>') +
+
+    dzBlock('sg-danger-lpgread', '🔥', 'Delete LPG Readings by Month',
+      'Removes every meter reading for one month only. Grouped by year, self-extending.',
+      '<div id="dz-lpgread-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-lpgread-months-status" style="margin-top:8px;"></div>') +
+
+    dzBlock('sg-danger-inward', '📥', 'Delete LPG Stock Inward by Month', '',
+      '<div id="dz-inward-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-inward-months-status" style="margin-top:8px;"></div>') +
+
+    dzBlock('sg-danger-outward', '📤', 'Delete LPG Stock Outward by Month', '',
+      '<div id="dz-outward-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-outward-months-status" style="margin-top:8px;"></div>') +
+
+    dzBlock('sg-danger-caretaker', '🧾', 'Delete Caretaker Expenses by Month',
+      'Removes every Caretaker petty-cash expense entry for one month only, so it can be re-imported cleanly. Does not touch Reserve Money (that\'s pulled live from the Bank Statement, not stored separately) or the starting balance seed.',
+      '<div id="dz-caretaker-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-caretaker-months-status" style="margin-top:8px;"></div>') +
+
+    dzBlock('sg-danger-resetall', '🗑', 'Reset ALL Payment Data',
+      'Deletes ALL Bank Statement transactions and ALL Fees Received payment records at once, for a full fresh-start test. Owners, Residents, Units, Settings and Categories are NOT touched.',
+      '<button class="btn btn-outline btn-sm" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="settingsResetPayments()">🗑 Reset ALL Payment Data</button>') +
+
+    dzBlock('sg-danger-owners', '👤', 'Delete ALL Owners',
+      'Removes every owner record from every unit. The archived owner history is NOT touched.',
+      '<button class="btn btn-outline btn-sm" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="dzDeleteAllOwners()">🗑 Delete ALL Owners</button>' +
+      '<div id="dz-owners-status" style="margin-top:8px;"></div>') +
+
+    dzBlock('sg-danger-tenants', '🏠', 'Delete ALL Tenants',
+      'Removes every resident record from every unit. The archived resident history is NOT touched.',
+      '<button class="btn btn-outline btn-sm" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="dzDeleteAllTenants()">🗑 Delete ALL Tenants</button>' +
+      '<div id="dz-tenants-status" style="margin-top:8px;"></div>') +
+
+    dzBlock('sg-danger-wipe', '☢️', 'Wipe Database for a New Facility',
+      'Clears Units, Owners, Tenants, ALL history archives, Payments, Bank Statement, and LPG Readings & Inventory — everything specific to THIS association. Settings, Categories and Users are kept so the app stays configured and nobody is locked out. Download a backup above first.',
+      '<button class="btn btn-outline btn-sm" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="dzWipeForNewFacility()">☢️ Wipe Database</button>',
+      true) +
+
+    '</div>';
+
+  document.getElementById('settings-content').innerHTML = html;
+  uaLoad();
+  lrLoad();
+  epLoad();
+  ayLoad();
+  dzLoadAllMonthTables();
+
+  // Load both category lists
+  catLoad('credit');
+  catLoad('debit');
+}
+
+function settingsFieldChange(key) {
+  var el = document.getElementById('sf-' + key);
+  if (el) settingsData[key] = el.value;
+}
+
+function settingsSaveAll() {
+  var btn = document.getElementById('settings-save-btn');
+  btn.disabled    = true;
+  btn.textContent = '⏳ Saving…';
+  document.getElementById('settings-status').innerHTML = '';
+
+  // Collect all current values from inputs
+  var allKeys = Object.keys(settingsData);
+  for (var i = 0; i < allKeys.length; i++) {
+    var el = document.getElementById('sf-' + allKeys[i]);
+    if (el) settingsData[allKeys[i]] = el.value;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(r) {
+      btn.disabled    = false;
+      btn.textContent = '💾 Save All Settings';
+      if (r && r.success) {
+        document.getElementById('settings-status').innerHTML =
+          '<div style="background:var(--c-verified-bg);color:var(--c-verified-fg);border:1px solid var(--c-verified-fg)30">' +
+          '✓ Settings saved successfully — ' + (r.data && r.data.saved || 0) + ' values updated.' +
+          '</div>';
+        // Scroll to top to show confirmation
+        document.getElementById('main-content').scrollTop = 0;
+      } else {
+        document.getElementById('settings-status').innerHTML =
+          '<div style="background:var(--c-rejected-bg);color:var(--c-rejected-fg);border:1px solid var(--c-rejected-fg)30">' +
+          '❌ Save failed: ' + (r && r.error || 'Unknown error') + '</div>';
+      }
+    })
+    .withFailureHandler(function(e) {
+      btn.disabled    = false;
+      btn.textContent = '💾 Save All Settings';
+      document.getElementById('settings-status').innerHTML =
+        '<div style="background:var(--c-rejected-bg);color:var(--c-rejected-fg)">❌ Error: ' + e + '</div>';
+    })
+    .doPost_internal('settings.saveAll', settingsData);
+}
+
+function settingsEsc(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ── Editable payment categories (credit = fees received, debit = expenses) ──
+
+function lrLoad() {
+  var now = new Date();
+  var ySel = document.getElementById('lr-year');
+  if (ySel && !ySel.options.length) {
+    var years = []; for (var y = now.getFullYear() + 1; y >= 2023; y--) years.push(y);
+    ySel.innerHTML = years.map(function(y){ return '<option value="'+y+'">'+y+'</option>'; }).join('');
+    ySel.value = String(now.getFullYear());
+    document.getElementById('lr-month').value = String(now.getMonth() + 1);
+  }
+  google.script.run.withSuccessHandler(function(r) {
+    var list = (r && r.success && r.data) ? r.data : [];
+    var el = document.getElementById('lr-list');
+    if (!el) return;
+    var mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No rates set yet — readings will use the fallback values above until you set one.</div>'; return; }
+    var h = '<div class="table-wrap"><table><thead><tr><th>Effective From</th><th style="text-align:right">Conv. Factor</th><th style="text-align:right">Price/Kg (₹)</th><th>Set By</th><th>Action</th></tr></thead><tbody>';
+    for (var i = list.length - 1; i >= 0; i--) {
+      var r = list[i];
+      h += '<tr><td style="font-weight:700">' + mn[r.month] + ' ' + r.year + '</td>' +
+        '<td style="text-align:right">' + r.conv_factor + '</td>' +
+        '<td style="text-align:right;font-weight:700">₹' + r.price_per_kg + '</td>' +
+        '<td style="font-size:11px;color:var(--text-muted)">' + (r.set_by || '—') + '</td>' +
+        '<td><button class="btn btn-xs btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg)" onclick="lrDelete(\'' + r.rate_id + '\')">Remove</button></td></tr>';
+    }
+    el.innerHTML = h + '</tbody></table></div>';
+  }).doPost_internal('lpg.listRates', {});
+}
+function lrSet() {
+  var year = (document.getElementById('lr-year') || {}).value;
+  var month = (document.getElementById('lr-month') || {}).value;
+  var conv = (document.getElementById('lr-conv') || {}).value;
+  var price = (document.getElementById('lr-price') || {}).value;
+  if (!price) { showToast('Enter the price per Kg', 'error'); return; }
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Rate saved', 'success'); document.getElementById('lr-price').value=''; lrLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e){ showToast('Error: ' + e, 'error'); })
+    .doPost_internal('lpg.setRate', { year: year, month: month, conv_factor: conv, price_per_kg: price, set_by: 'Manager' });
+}
+function lrDelete(rateId) {
+  if (!confirm('Remove this rate entry?')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Removed', 'success'); lrLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).doPost_internal('lpg.deleteRate', { rate_id: rateId });
+}
+
+// ── Expense Category Auto-Match Patterns ───────────────────────
+function epLoad() {
+  // Populate the category dropdown from the existing debit category list.
+  google.script.run.withSuccessHandler(function(r) {
+    var cats = (r && r.success && r.data) ? r.data.filter(function(c) { return c.active !== 'No'; }) : [];
+    var sel = document.getElementById('ep-category');
+    if (sel) sel.innerHTML = cats.map(function(c) { return '<option value="' + settingsEsc(c.name) + '">' + settingsEsc(c.name) + '</option>'; }).join('');
+  }).doPost_internal('categories.getAll', { kind: 'debit' });
+
+  google.script.run.withSuccessHandler(function(r) {
+    var list = (r && r.success && r.data) ? r.data : [];
+    var el = document.getElementById('ep-list');
+    if (!el) return;
+    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No patterns defined yet — everything is currently guessed automatically from category names and a few built-in keywords only.</div>'; return; }
+    var h = '<table class="settings-table"><thead><tr><th>Narration Pattern</th><th style="width:120px;text-align:right;">Exact Amount</th><th>Expense Category</th><th style="width:70px;text-align:right;">Action</th></tr></thead><tbody>';
+    list.forEach(function(p) {
+      h += '<tr class="cat-row">'+
+        '<td>' + (p.pattern_text ? '<strong>"' + settingsEsc(p.pattern_text) + '"</strong>' : '<span style="color:var(--text-muted);">— any —</span>') + '</td>'+
+        '<td style="text-align:right;">' + (p.amount !== null && p.amount !== undefined ? '₹' + Number(p.amount).toLocaleString('en-IN') : '<span style="color:var(--text-muted);">— any —</span>') + '</td>'+
+        '<td>' + settingsEsc(p.expense_category) + '</td>'+
+        '<td style="text-align:right;"><span class="edit-pencil" title="Delete" style="cursor:pointer;" onclick="epDelete(\''+p.pattern_id+'\')">🗑️</span></td>'+
+        '</tr>';
+    });
+    el.innerHTML = h + '</tbody></table>';
+  }).doPost_internal('expensePatterns.getAll', {});
+}
+
+function epAdd() {
+  var patternText = (document.getElementById('ep-pattern')||{}).value || '';
+  var amountRaw = (document.getElementById('ep-amount')||{}).value || '';
+  var category = (document.getElementById('ep-category')||{}).value || '';
+  if (!patternText.trim() && !amountRaw.trim()) { showToast('Enter narration text, an amount, or both', 'error'); return; }
+  if (!category) { showToast('Choose an expense category', 'error'); return; }
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) {
+      showToast('Pattern added', 'success');
+      document.getElementById('ep-pattern').value = '';
+      document.getElementById('ep-amount').value = '';
+      epLoad();
+    } else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('expensePatterns.add', { pattern_text: patternText, amount: amountRaw.trim() || '', expense_category: category });
+}
+
+function epDelete(id) {
+  if (!confirm('Remove this pattern?')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Removed', 'success'); epLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).doPost_internal('expensePatterns.delete', { pattern_id: id });
+}
+
+// ── Universal Active Year ───────────────────────────────────────
+function ayLoad() {
+  google.script.run.withSuccessHandler(function(r) {
+    var year = (r && r.success) ? r.data : new Date().getFullYear();
+    var cur = document.getElementById('ay-current');
+    if (cur) cur.textContent = year;
+    var sel = document.getElementById('ay-select');
+    if (sel && !sel.options.length) {
+      var now = new Date(), years = [];
+      for (var y = now.getFullYear() + 1; y >= 2023; y--) years.push(y);
+      sel.innerHTML = years.map(function(yy) { return '<option value="' + yy + '">' + yy + '</option>'; }).join('');
+    }
+    if (sel) sel.value = String(year);
+  }).doPost_internal('settings.getActiveYear', {});
+}
+
+function ayApply() {
+  var sel = document.getElementById('ay-select');
+  var year = sel ? Number(sel.value) : 0;
+  if (!year) return;
+  if (!confirm('Set ' + year + ' as the Active Year for the WHOLE app?\nEveryone will see this as the default focus on the Dashboard, and editing any other year will need Administrator confirmation from then on.')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Active Year set to ' + year, 'success'); ayLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('settings.setActiveYear', { year: year });
+}
+
+// Collapsible section headers — click to expand/collapse; chevron shows
+// "+" collapsed / "−" expanded. Collapsed by default so the page opens short.
+function settingsToggleGroup(headEl) {
+  var group = headEl.parentElement;
+  if (!group) return;
+  group.classList.toggle('collapsed');
+  var chev = headEl.querySelector('.settings-toggle-chevron');
+  if (chev) chev.textContent = group.classList.contains('collapsed') ? '+' : '−';
+}
+
+function uaLoad() {
+  google.script.run.withSuccessHandler(function(r) {
+    var list = (r && r.success && r.data) ? r.data : [];
+    var el = document.getElementById('ua-list');
+    if (!el) return;
+    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No users yet — you were auto-added as the first Administrator on your first visit.</div>'; return; }
+    var h = '<div class="table-wrap"><table><thead><tr><th>Email</th><th>Name</th><th>Role</th><th>PIN</th><th>Added By</th><th>Action</th></tr></thead><tbody>';
+    for (var i = 0; i < list.length; i++) {
+      var u = list[i];
+      h += '<tr><td style="font-weight:600">' + u.email + (u.is_owner ? ' <span class="pill pill-occupied" title="Script owner — always an Administrator">Owner</span>' : '') + '</td>' +
+        '<td>' + (u.name || '—') + '</td>' +
+        '<td><select onchange="uaSetRole(\'' + u.email + '\', this.value)" style="padding:4px 8px;font-size:12px;">' +
+          '<option value="user"' + (u.role !== 'admin' ? ' selected' : '') + '>User</option>' +
+          '<option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>Administrator</option></select></td>' +
+        '<td>' + (u.has_pin ? '<span class="pill" style="background:rgba(16,185,129,.15);color:#10b981;font-size:10.5px;font-weight:700;">✓ Set</span>' : '<span class="pill" style="background:rgba(255,255,255,.08);color:var(--text-muted);font-size:10.5px;">None</span>') + '</td>' +
+        '<td style="font-size:11px;color:var(--text-muted)">' + (u.added_by || '—') + '</td>' +
+        '<td style="white-space:nowrap;"><button class="btn btn-xs btn-outline" onclick="uaSetPin(\'' + u.email + '\')">' + (u.has_pin ? '🔑 Reset PIN' : '🔑 Set PIN') + '</button> ' +
+        '<button class="btn btn-xs btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg)" onclick="uaRemove(\'' + u.email + '\')">Remove</button></td></tr>';
+    }
+    el.innerHTML = h + '</tbody></table></div>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;">🔑 PIN: a fallback login for accounts Google itself can\'t identify by email on this personal (non-Workspace) deployment — see the note above the table. The PIN is never stored in readable form and cannot be looked up later, only reset.</div>';
+  }).doPost_internal('users.list', {});
+}
+function uaSetPin(email) {
+  var pin = prompt('Set a PIN for ' + email + ' (at least 4 characters).\n\nGive this PIN to them directly (WhatsApp, in person) — it cannot be looked up again afterward, only reset to a new one.');
+  if (pin === null) return; // cancelled
+  if (!pin || pin.trim().length < 4) { showToast('PIN must be at least 4 characters', 'error'); return; }
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('PIN set for ' + email, 'success'); uaLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('auth.setPin', { email: email, pin: pin.trim() });
+}
+function uaAdd() {
+  var em = (document.getElementById('ua-email') || {}).value || '';
+  var nm = (document.getElementById('ua-name') || {}).value || '';
+  var rl = (document.getElementById('ua-role') || {}).value || 'user';
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('User added', 'success'); document.getElementById('ua-email').value=''; document.getElementById('ua-name').value=''; uaLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e){ showToast('Error: ' + e, 'error'); })
+    .doPost_internal('users.add', { email: em, name: nm, role: rl });
+}
+function uaSetRole(email, role) {
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Role updated', 'success'); uaLoad(); }
+    else { showToast((r && r.error) || 'Failed', 'error'); uaLoad(); }
+  }).doPost_internal('users.setRole', { email: email, role: role });
+}
+function uaRemove(email) {
+  if (!confirm('Remove access for ' + email + '?')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('User removed', 'success'); uaLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).doPost_internal('users.remove', { email: email });
+}
+
+// ── Danger Zone: monthly delete tables ─────────────────────────
+function dzLoadAllMonthTables() {
+  dzLoadMonthTable('dz-bank-months', 'admin.getBankMonthSummary', 'admin.deleteBankByMonth', 'transaction(s)', false);
+  dzLoadMonthTable('dz-bank2-months', 'admin.getBank2MonthSummary', 'admin.deleteBank2ByMonth', 'transaction(s)', false);
+  dzLoadMonthTable('dz-lpgread-months', 'admin.getLpgReadingsMonthSummary', 'admin.deleteLpgReadingsByMonth', 'reading(s)', true);
+  dzLoadMonthTable('dz-inward-months', 'admin.getLpgInwardMonthSummary', 'admin.deleteLpgInwardByMonth', 'purchase record(s)', false);
+  dzLoadMonthTable('dz-outward-months', 'admin.getLpgOutwardMonthSummary', 'admin.deleteLpgOutwardByMonth', 'usage record(s)', false);
+  dzLoadMonthTable('dz-caretaker-months', 'caretaker.getMonthSummary', 'caretaker.deleteByMonth', 'expense entry(s)', false);
+}
+
+// monthIsYearMonth: true when the month string in the summary is "YYYY-M"
+// (LPG readings, which store year/month as separate numbers) rather than
+// the zero-padded "YYYY-MM" key everything else uses.
+function dzLoadMonthTable(elId, summaryRoute, deleteRoute, unitLabel, monthIsYearMonth) {
+  var mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  google.script.run.withSuccessHandler(function(r) {
+    var list = (r && r.success && r.data) ? r.data : [];
+    var el = document.getElementById(elId);
+    if (!el) return;
+    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No data recorded yet.</div>'; return; }
+
+    // Group by year — entirely driven by whatever years actually appear in
+    // the data, so 2023, 2025, 2026, 2027... all show up on their own the
+    // moment there's data for them. Nothing here is hardcoded to any year.
+    var byYear = {};
+    list.forEach(function(m) {
+      var y = m.month.split('-')[0];
+      if (!byYear[y]) byYear[y] = [];
+      byYear[y].push(m);
+    });
+    var years = Object.keys(byYear).sort(function(a, b) { return b - a; }); // newest year first
+
+    var h = '';
+    years.forEach(function(y) {
+      var yid = elId + '-y' + y;
+      h += '<div style="margin-bottom:6px;">' +
+        '<div onclick="dzToggleYear(\'' + yid + '\')" style="cursor:pointer;font-weight:700;font-size:12.5px;padding:6px 8px;background:var(--bg-surface2);border-radius:6px;display:flex;justify-content:space-between;">' +
+          '<span>' + y + ' (' + byYear[y].length + ' month' + (byYear[y].length !== 1 ? 's' : '') + ')</span>' +
+          '<span class="settings-toggle-chevron" id="' + yid + '-chev">+</span>' +
+        '</div>' +
+        '<div id="' + yid + '" class="dz-month-table" style="display:none;margin-top:4px;"><table><thead><tr><th>Month</th><th>Count</th><th>Action</th></tr></thead><tbody>';
+      byYear[y].forEach(function(m) {
+        var parts = m.month.split('-');
+        var label = mn[parseInt(parts[1], 10)] + ' ' + parts[0];
+        h += '<tr><td style="font-weight:700">' + label + '</td><td>' + m.count + ' ' + unitLabel + '</td>' +
+          '<td><button class="btn btn-xs btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg)" ' +
+          'onclick="dzDeleteMonth(\'' + deleteRoute + '\',\'' + m.month + '\',\'' + elId + '\',\'' + summaryRoute + '\',\'' + unitLabel + '\',' + monthIsYearMonth + ')">🗑 Delete ' + label + '</button></td></tr>';
+      });
+      h += '</tbody></table></div></div>';
+    });
+    el.innerHTML = h;
+  }).doPost_internal(summaryRoute, {});
+}
+
+// Shared persistent status box for Danger Zone actions — a toast alone
+// is too easy to miss for a permanent, destructive operation; this stays
+// visible in place until the next action replaces or clears it. Lives
+// OUTSIDE the table container itself, since that gets fully rebuilt
+// every refresh and would otherwise wipe the message the instant the
+// list reloads after a successful delete.
+function dzShowStatus(elId, msg, type) {
+  var el = document.getElementById(elId + '-status');
+  if (!el) return;
+  if (!msg) { el.innerHTML = ''; return; }
+  var bg = type === 'success' ? 'var(--c-verified-bg)' : type === 'error' ? 'var(--c-rejected-bg)' : 'var(--bg-surface2)';
+  var fg = type === 'success' ? 'var(--c-verified-fg)' : type === 'error' ? 'var(--c-rejected-fg)' : 'var(--text-secondary)';
+  el.innerHTML = '<div style="background:' + bg + ';color:' + fg + ';padding:8px 12px;border-radius:6px;font-size:12.5px;">' + msg + '</div>';
+}
+
+function dzToggleYear(yid) {
+  var box = document.getElementById(yid);
+  var chev = document.getElementById(yid + '-chev');
+  if (!box) return;
+  var open = box.style.display !== 'none';
+  box.style.display = open ? 'none' : 'block';
+  if (chev) chev.textContent = open ? '+' : '−';
+}
+
+function dzDeleteMonth(deleteRoute, monthKey, elId, summaryRoute, unitLabel, monthIsYearMonth) {
+  var mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var parts = monthKey.split('-');
+  var label = mn[parseInt(parts[1], 10)] + ' ' + parts[0];
+  var cascadeNote = (deleteRoute === 'admin.deleteBankByMonth' || deleteRoute === 'admin.deleteBank2ByMonth') ? '\nThis also deletes that month\'s Fees Received records, since they were posted from these transactions.' : '';
+  var word = prompt('This permanently deletes all ' + unitLabel + ' for ' + label + '.' + cascadeNote + '\nType DELETE to confirm:');
+  if (word !== 'DELETE') { dzShowStatus(elId, 'Cancelled — nothing was deleted.', ''); return; }
+  dzShowStatus(elId, '⏳ Deleting ' + label + '…', '');
+  var payload = monthIsYearMonth
+    ? { year: parseInt(parts[0], 10), month: parseInt(parts[1], 10) }
+    : { month: monthKey };
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) {
+      var msg = '✓ Deleted ' + (r.data.deleted || 0) + ' ' + unitLabel + ' for ' + label;
+      if (r.data.paymentsDeleted) msg += ' — and ' + r.data.paymentsDeleted + ' related Fees Received record(s) too';
+      dzShowStatus(elId, msg, 'success');
+      dzLoadMonthTable(elId, summaryRoute, deleteRoute, unitLabel, monthIsYearMonth);
+    }
+    else dzShowStatus(elId, '❌ ' + ((r && r.error) || 'Failed'), 'error');
+  }).withFailureHandler(function(e) { dzShowStatus(elId, '❌ Error: ' + e, 'error'); })
+    .doPost_internal(deleteRoute, payload);
+}
+
+// ── Danger Zone: delete all Owners / Tenants ───────────────────
+function dzDeleteAllOwners() {
+  var word = prompt('This deletes EVERY owner record on EVERY unit.\nArchived owner history is kept.\n\nType DELETE ALL OWNERS to confirm:');
+  if (word !== 'DELETE ALL OWNERS') { dzShowStatus('dz-owners', 'Cancelled — nothing was deleted.', ''); return; }
+  dzShowStatus('dz-owners', '⏳ Deleting all owner records…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) dzShowStatus('dz-owners', '✓ Deleted ' + r.data.deleted + ' owner record(s)', 'success');
+    else dzShowStatus('dz-owners', '❌ ' + ((r && r.error) || 'Failed'), 'error');
+  }).withFailureHandler(function(e) { dzShowStatus('dz-owners', '❌ Error: ' + e, 'error'); })
+    .doPost_internal('admin.deleteAllOwners', {});
+}
+
+function dzDeleteAllTenants() {
+  var word = prompt('This deletes EVERY resident record on EVERY unit.\nArchived resident history is kept.\n\nType DELETE ALL TENANTS to confirm:');
+  if (word !== 'DELETE ALL TENANTS') { dzShowStatus('dz-tenants', 'Cancelled — nothing was deleted.', ''); return; }
+  dzShowStatus('dz-tenants', '⏳ Deleting all resident records…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) dzShowStatus('dz-tenants', '✓ Deleted ' + r.data.deleted + ' resident record(s)', 'success');
+    else dzShowStatus('dz-tenants', '❌ ' + ((r && r.error) || 'Failed'), 'error');
+  }).withFailureHandler(function(e) { dzShowStatus('dz-tenants', '❌ Error: ' + e, 'error'); })
+    .doPost_internal('admin.deleteAllTenants', {});
+}
+
+// ── Danger Zone: full backup / restore / wipe ──────────────────
+function dzExportBackup() {
+  showToast('Preparing backup…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { showToast((r && r.error) || 'Backup failed', 'error'); return; }
+    var jsonText = r.data;
+    var blob = new Blob([jsonText], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    var stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    a.href = url;
+    a.download = 'OXYGEN-backup-' + stamp + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Backup downloaded', 'success');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('admin.exportBackup', {});
+}
+
+function dzRestoreBackup() {
+  var inp = document.getElementById('dz-restore-file');
+  if (!inp || !inp.files || !inp.files.length) { showToast('Choose a backup file first', 'error'); return; }
+  var word = prompt('This OVERWRITES every sheet found in the backup file with its saved contents.\nCurrent data in those sheets will be lost.\n\nType RESTORE to confirm:');
+  if (word !== 'RESTORE') { showToast('Cancelled', ''); return; }
+  var file = inp.files[0];
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var jsonText = ev.target.result;
+    dzStatusBox('dz-restore-status', '⏳ Restoring…', '');
+    google.script.run.withSuccessHandler(function(r) {
+      if (!r || !r.success) { dzStatusBox('dz-restore-status', '❌ ' + (r ? r.error : 'failed'), 'error'); return; }
+      dzStatusBox('dz-restore-status', '✓ Restored: ' + r.data.restored.join(', ') + '. Backup was taken ' + r.data.exportedAt + '. Reload the page to see the restored data.', 'success');
+    }).withFailureHandler(function(e) { dzStatusBox('dz-restore-status', '❌ ' + e, 'error'); })
+      .doPost_internal('admin.restoreBackup', { json_text: jsonText });
+  };
+  reader.readAsText(file);
+}
+
+function dzWipeForNewFacility() {
+  var word = prompt('This clears Units, Owners, Tenants, ALL history, Payments, Bank Statement, and LPG data — everything specific to this association. Settings/Categories/Users are kept.\n\nDownload a backup first if you have not already.\n\nType WIPE DATABASE to confirm:');
+  if (word !== 'WIPE DATABASE') { showToast('Cancelled', ''); return; }
+  if (!confirm('Are you absolutely sure? This cannot be undone without a backup.')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) showToast('Database wiped: ' + r.data.cleared.join(', '), 'success');
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).doPost_internal('admin.wipeForNewFacility', {});
+}
+
+function dzStatusBox(elId, msg, type) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  var color = type === 'error' ? 'var(--c-rejected-fg)' : (type === 'success' ? 'var(--c-verified-fg)' : 'var(--text-muted)');
+  el.innerHTML = '<div style="font-size:12.5px;color:' + color + ';">' + msg + '</div>';
+}
+
+function settingsResetPayments() {
+  var word = prompt('This deletes EVERY bank transaction and EVERY fee payment record.\nOwners/Residents/Units are kept. This cannot be undone.\n\nType RESET to confirm:');
+  if (word !== 'RESET') { showToast('Reset cancelled', ''); return; }
+  showToast('Resetting…', '');
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (r && r.success) {
+        var c = (r.data && r.data.cleared) || {};
+        showToast('Cleared ' + (c.BankStatements || 0) + ' bank rows and ' + (c.Payments || 0) + ' payment rows', 'success');
+      } else { showToast((r && r.error) || 'Reset failed', 'error'); }
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('admin.resetPaymentData', {});
+}
+
+function catLoad(kind) {
+  var listEl = document.getElementById('cat-'+kind+'-list');
+  if (listEl) listEl.innerHTML = loadingHtml('Loading…');
+  google.script.run
+    .withSuccessHandler(function(r){
+      var rows = (r&&r.success&&r.data)?r.data:[];
+      catRender(kind, rows);
+    })
+    .withFailureHandler(function(e){
+      if (listEl) listEl.innerHTML = '<div style="color:var(--c-rejected-fg);padding:10px">Error: '+e+'</div>';
+    })
+    .doPost_internal('categories.getAll', { kind: kind });
+}
+
+function catRender(kind, rows) {
+  var listEl = document.getElementById('cat-'+kind+'-list');
+  if (!listEl) return;
+  var addLabel = kind==='credit' ? 'e.g. Party Hall Rental' : 'e.g. Care Taker';
+  // A proper table (matching LPG Rate History / Danger Zone tables), not
+  // free-flowing rows — clear columns, hover pencil to rename/delete.
+  var h = '<table class="settings-table"><thead><tr><th>Category Name</th><th style="width:70px;text-align:center;">Status</th><th style="width:80px;text-align:right;">Action</th></tr></thead><tbody>';
+  if (!rows.length) {
+    h += '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);">No categories yet.</td></tr>';
+  }
+  for (var i=0;i<rows.length;i++){
+    var c = rows[i];
+    var id = settingsEsc(c.category_id);
+    var nm = settingsEsc(c.name);
+    var inactive = c.active==='No';
+    h += '<tr class="cat-row"'+(inactive?' style="opacity:.5;"':'')+'>'+
+      '<td>'+nm+'</td>'+
+      '<td style="text-align:center;font-size:11px;color:var(--text-muted);">'+(inactive?'Inactive':'Active')+'</td>'+
+      '<td style="text-align:right;white-space:nowrap;">'+
+        '<span class="edit-pencil" title="Rename" onclick="catOpenEdit(\''+kind+'\',\''+id+'\',\''+nm+'\')" style="cursor:pointer;margin-right:10px;">✏️</span>'+
+        '<span class="edit-pencil" title="Delete" onclick="catDelete(\''+kind+'\',\''+id+'\',\''+nm+'\')" style="cursor:pointer;">🗑️</span>'+
+      '</td></tr>';
+  }
+  h += '</tbody></table>';
+  // Add-new row
+  h += '<div style="display:flex;gap:8px;align-items:center;margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);">'+
+    '<input id="cat-new-'+kind+'" type="text" placeholder="'+addLabel+'" style="flex:1;padding:7px 10px;font-size:13px;" '+
+      'onkeydown="if(event.key===\'Enter\')catAdd(\''+kind+'\')">'+
+    '<button class="btn btn-sm btn-primary" onclick="catAdd(\''+kind+'\')">+ Add</button>'+
+    '</div>';
+  listEl.innerHTML = h;
+}
+
+function catOpenEdit(kind, id, currentName) {
+  openModal(
+    '<div class="modal-header"><span class="modal-title">✏️ Rename Category</span>'+
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="form-group"><label>Category Name</label><input id="cat-edit-name" type="text" value="'+currentName+'"></div>'+
+      '<div class="form-actions">'+
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>'+
+        '<button class="btn btn-accent" onclick="catSave(\''+kind+'\',\''+id+'\')">💾 Save</button>'+
+      '</div></div>'
+  );
+  setTimeout(function(){ var el=document.getElementById('cat-edit-name'); if(el){ el.focus(); el.select(); } }, 60);
+}
+
+function catAdd(kind) {
+  var el = document.getElementById('cat-new-'+kind);
+  var name = el ? el.value.trim() : '';
+  if (!name) { showToast('Enter a category name','error'); return; }
+  google.script.run
+    .withSuccessHandler(function(r){
+      if (r && r.success) { showToast('Added','success'); if(el) el.value=''; catLoad(kind); }
+      else { showToast((r&&r.error)||'Failed','error'); }
+    })
+    .withFailureHandler(function(e){ showToast('Error: '+e,'error'); })
+    .doPost_internal('categories.add', { kind: kind, name: name });
+}
+
+function catSave(kind, id) {
+  var el = document.getElementById('cat-edit-name');
+  var name = el ? el.value.trim() : '';
+  if (!name) { showToast('Name cannot be empty','error'); return; }
+  google.script.run
+    .withSuccessHandler(function(r){
+      if (r && r.success) { showToast('Saved','success'); closeModalForce(); catLoad(kind); }
+      else showToast((r&&r.error)||'Failed','error');
+    })
+    .withFailureHandler(function(e){ showToast('Error: '+e,'error'); })
+    .doPost_internal('categories.update', { category_id: id, name: name });
+}
+
+function catDelete(kind, id, name) {
+  if (!confirm('Delete category "'+name+'"?\n\nExisting transactions already tagged with it will keep the label.')) return;
+  google.script.run
+    .withSuccessHandler(function(r){
+      if (r && r.success) { showToast('Deleted','success'); catLoad(kind); }
+      else { showToast((r&&r.error)||'Failed','error'); }
+    })
+    .withFailureHandler(function(e){ showToast('Error: '+e,'error'); })
+    .doPost_internal('categories.delete', { category_id: id });
+}
+</script>

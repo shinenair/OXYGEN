@@ -1,0 +1,298 @@
+<!-- Scripts.html — Shared client-side helpers (formatRupees, formatDate, showToast, openModal, etc.) used by every page -->
+<script>
+  // ============================================================
+  // Scripts.html — Shared Frontend JS Utilities
+  // ============================================================
+
+  /* ── API Bridge ─────────────────────────────────────────────── */
+  function api(action, data) {
+    return new Promise(function(resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function(r) { resolve(r); })
+        .withFailureHandler(function(e) { reject(e); })
+        .doPost_internal(action, data || {});
+    });
+  }
+
+  /* ── Historical-year edit confirmation ─────────────────────────
+     Drop-in replacement for the usual
+       google.script.run.withSuccessHandler(...).withFailureHandler(...).doPost_internal(action, data)
+     pattern, for any action that writes year-specific data (Bank
+     Statement, Payments, LPG Readings, LPG Inventory). If the server
+     reports the record belongs to a past year and the signed-in user is
+     an Administrator, it shows one confirmation prompt and retries
+     automatically with confirmed_historical:true. A non-admin editing
+     historical data is stopped with a clear message and never prompted,
+     since they were never going to be allowed to proceed either way. */
+  function doPostWithHistoryConfirm(action, data, onSuccess, onError) {
+    google.script.run
+      .withSuccessHandler(function(r) {
+        if (r && r.success === false && r.error === 'CONFIRM_HISTORICAL_EDIT') {
+          var ok = confirm('This record is from a past year, not the year OXYGEN is currently focused on.\nAre you sure you want to edit historical data?');
+          if (!ok) { if (onError) onError('Cancelled'); return; }
+          var retryData = {};
+          for (var k in data) retryData[k] = data[k];
+          retryData.confirmed_historical = true;
+          google.script.run
+            .withSuccessHandler(function(r2) { if (onSuccess) onSuccess(r2); })
+            .withFailureHandler(function(e2) { if (onError) onError(e2); })
+            .doPost_internal(action, retryData);
+          return;
+        }
+        if (onSuccess) onSuccess(r);
+      })
+      .withFailureHandler(function(e) { if (onError) onError(e); })
+      .doPost_internal(action, data || {});
+  }
+
+  /* ── Toast ──────────────────────────────────────────────────── */
+  function showToast(message, type) {
+    var container = document.getElementById('toast-container');
+    var toast = document.createElement('div');
+    toast.className = 'toast ' + (type || '');
+
+    var icons = { success: '✓', error: '✕', warning: '!' };
+    var icon  = icons[type] || 'ℹ';
+
+    toast.innerHTML =
+      '<div class="toast-icon">' + icon + '</div>' +
+      '<span style="flex:1;">' + message + '</span>';
+
+    container.appendChild(toast);
+
+    setTimeout(function() {
+      toast.style.transition = '0.3s ease';
+      toast.style.opacity    = '0';
+      toast.style.transform  = 'translateX(12px)';
+      setTimeout(function() { toast.remove(); }, 300);
+    }, 3500);
+  }
+
+  /* ── Modal ──────────────────────────────────────────────────── */
+  function openModal(html) {
+    var box = document.getElementById('modal-box');
+    // Reset any inline sizing left by wide profile modals
+    box.style.maxWidth  = '';
+    box.style.width     = '';
+    box.style.maxHeight = '';
+    box.innerHTML = html;
+    document.getElementById('modal-overlay').classList.add('open');
+  }
+
+  function closeModal(event) {
+    if (!event || event.target === document.getElementById('modal-overlay')) {
+      document.getElementById('modal-overlay').classList.remove('open');
+    }
+  }
+
+  function closeModalForce() {
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+
+  /* ── Loading / Empty ────────────────────────────────────────── */
+  function loadingHtml(msg) {
+    return '<div class="loading"><div class="spinner"></div>' + (msg || 'Loading…') + '</div>';
+  }
+
+  function emptyHtml(icon, msg) {
+    return '<div class="empty-state"><div class="empty-icon">' + (icon || '📭') + '</div><p>' + (msg || 'No records found.') + '</p></div>';
+  }
+
+  /* ── Formatters ─────────────────────────────────────────────── */
+  function formatRupees(amount) {
+    return '₹' + Math.round(Number(amount || 0)).toLocaleString('en-IN');
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    try {
+      var s   = String(dateStr);
+      var mns = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      // Plain YYYY-MM-DD (no time): format directly from the components.
+      // Parsing it with new Date() would treat it as UTC midnight and shift
+      // the day for viewers west of UTC.
+      var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (m) {
+        var dd = parseInt(m[3], 10), mo = parseInt(m[2], 10), yy = m[1];
+        if (mo >= 1 && mo <= 12) return (dd < 10 ? '0' + dd : String(dd)) + ' ' + mns[mo - 1] + ' ' + yy;
+      }
+      var d = new Date(s);
+      if (isNaN(d)) return s;
+      var day = d.getDate();
+      return (day < 10 ? '0' + day : String(day)) + ' ' + mns[d.getMonth()] + ' ' + d.getFullYear();
+    } catch(e) { return String(dateStr); }
+  }
+
+  function formatMonth(monthStr) {
+    if (!monthStr) return '—';
+    try {
+      var parts = String(monthStr).split('-');
+      if (parts.length < 2) return monthStr;
+      return new Date(Number(parts[0]), Number(parts[1]) - 1)
+        .toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    } catch(e) { return String(monthStr); }
+  }
+
+  function pillStatus(status) {
+    var map = {
+      'Occupied':      'pill pill-occupied',
+      'Vacant':        'pill pill-vacant',
+      'Pending':       'pill pill-pending',
+      'Verified':      'pill pill-verified',
+      'Rejected':      'pill pill-rejected',
+      'Resident':      'pill pill-resident',
+      'Non-Resident':  'pill pill-non-resident',
+      'Maintenance':   'pill pill-maintenance',
+      'Waste Management':'pill pill-waste',
+      'LPG':           'pill pill-lpg'
+    };
+    return '<span class="' + (map[status] || 'pill') + '">' + status + '</span>';
+  }
+
+  /* ── Table Builder ──────────────────────────────────────────── */
+  function buildTable(columns, rows, actionsFn) {
+    if (!rows || rows.length === 0) return emptyHtml('📭', 'No records found.');
+
+    var html = '<div class="table-wrap"><table><thead><tr>';
+    columns.forEach(function(col) { html += '<th>' + col.label + '</th>'; });
+    if (actionsFn) html += '<th style="width:1%;">Actions</th>';
+    html += '</tr></thead><tbody>';
+
+    rows.forEach(function(row) {
+      html += '<tr>';
+      columns.forEach(function(col) {
+        var val = row[col.key];
+        html += '<td>' + (col.render ? col.render(val, row) : (val !== undefined && val !== '' ? val : '—')) + '</td>';
+      });
+      if (actionsFn) html += '<td style="white-space:nowrap;">' + actionsFn(row) + '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  /* ── Sidebar & Pending Badge ────────────────────────────────── */
+  function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+  }
+
+  /* ── Close sidebar on main content tap (mobile) ─────────────── */
+  document.addEventListener('DOMContentLoaded', function() {
+    var mc = document.getElementById('main-content');
+    if (mc) mc.addEventListener('click', function() {
+      document.getElementById('sidebar').classList.remove('open');
+    });
+  });
+
+// ═══ svFilter — reusable spreadsheet-style column value filter ═══
+// Opens a popover with a searchable checkbox list of a column's
+// distinct values (with counts), Select all / Clear, and Apply —
+// exactly like a spreadsheet's filter dropdown. The CALLER owns the
+// state: pass the current selection (null = everything), receive the
+// new selection via onApply (null when everything is selected, else an
+// object map of the chosen value-keys).
+function svfOpen(opts) {
+  svfClose();
+  var values = opts.values || [];          // [{ v:'170', label:'₹170', count: 43 }]
+  var selected = opts.selected;            // null | { '170': true, ... }
+  var working = {};
+  values.forEach(function(x) { working[x.v] = (selected === null || selected === undefined) ? true : !!selected[x.v]; });
+
+  var overlay = document.createElement('div');
+  overlay.id = 'svf-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9000;background:transparent;';
+  overlay.onclick = svfClose;
+
+  var panel = document.createElement('div');
+  panel.id = 'svf-panel';
+  panel.style.cssText = 'position:fixed;z-index:9001;background:var(--bg-surface,#1e293b);border:1px solid var(--border,rgba(128,128,128,.4));border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.35);width:260px;max-height:420px;display:flex;flex-direction:column;padding:10px;';
+  panel.onclick = function(e) { e.stopPropagation(); };
+
+  var h = '<div style="font-weight:700;font-size:12.5px;margin-bottom:8px;">' + (opts.title || 'Filter values') + '</div>' +
+    '<input id="svf-search" type="text" placeholder="🔍 Search values…" style="width:100%;padding:6px 8px;font-size:12px;margin-bottom:8px;" oninput="svfFilterList()">' +
+    '<div style="display:flex;gap:8px;margin-bottom:8px;font-size:11.5px;">' +
+      '<a href="#" onclick="svfSetAll(true);return false;" style="color:var(--accent);text-decoration:underline;">Select all</a>' +
+      '<a href="#" onclick="svfSetAll(false);return false;" style="color:var(--accent);text-decoration:underline;">Clear</a>' +
+      '<span id="svf-count" style="margin-left:auto;color:var(--text-muted);"></span>' +
+    '</div>' +
+    '<div id="svf-list" style="overflow-y:auto;flex:1;border-top:1px solid var(--border,rgba(128,128,128,.25));border-bottom:1px solid var(--border,rgba(128,128,128,.25));padding:4px 0;"></div>' +
+    '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">' +
+      '<button class="btn btn-sm btn-outline" onclick="svfClose()">Cancel</button>' +
+      '<button class="btn btn-sm btn-accent" onclick="svfApply()">Apply</button>' +
+    '</div>';
+  panel.innerHTML = h;
+  document.body.appendChild(overlay);
+  document.body.appendChild(panel);
+
+  // Position near the click, clamped to the viewport.
+  var x = 100, y = 100;
+  if (opts.anchorEvent) { x = opts.anchorEvent.clientX; y = opts.anchorEvent.clientY; }
+  var pw = 260, ph = Math.min(420, window.innerHeight - 40);
+  if (x + pw > window.innerWidth - 12) x = window.innerWidth - pw - 12;
+  if (y + ph > window.innerHeight - 12) y = Math.max(12, window.innerHeight - ph - 12);
+  panel.style.left = x + 'px';
+  panel.style.top = y + 'px';
+
+  window._svfState = { values: values, working: working, onApply: opts.onApply };
+  svfRenderList();
+}
+
+function svfRenderList() {
+  var s = window._svfState;
+  if (!s) return;
+  var q = String((document.getElementById('svf-search') || {}).value || '').toLowerCase();
+  var list = document.getElementById('svf-list');
+  var count = document.getElementById('svf-count');
+  if (!list) return;
+  var h = '';
+  var checkedN = 0;
+  s.values.forEach(function(x) {
+    if (s.working[x.v]) checkedN++;
+    if (q && x.label.toLowerCase().indexOf(q) === -1) return;
+    h += '<label style="display:flex;align-items:center;gap:8px;padding:3px 4px;font-size:12px;cursor:pointer;margin:0;font-weight:400;">' +
+      '<input type="checkbox"' + (s.working[x.v] ? ' checked' : '') + ' onchange="window._svfState.working[\'' + String(x.v).replace(/'/g, "\\'") + '\']=this.checked;svfRenderList();">' +
+      '<span style="flex:1;">' + x.label + '</span>' +
+      '<span style="color:var(--text-muted);font-size:11px;">' + (x.count !== undefined ? x.count : '') + '</span>' +
+    '</label>';
+  });
+  list.innerHTML = h || '<div style="color:var(--text-muted);font-size:12px;padding:8px;">No values match.</div>';
+  if (count) count.textContent = checkedN + ' / ' + s.values.length + ' selected';
+}
+
+function svfFilterList() { svfRenderList(); }
+
+function svfSetAll(state) {
+  var s = window._svfState;
+  if (!s) return;
+  var q = String((document.getElementById('svf-search') || {}).value || '').toLowerCase();
+  s.values.forEach(function(x) {
+    if (q && x.label.toLowerCase().indexOf(q) === -1) return; // only what's visible under the search
+    s.working[x.v] = state;
+  });
+  svfRenderList();
+}
+
+function svfApply() {
+  var s = window._svfState;
+  if (!s) return;
+  var allChecked = true, noneChecked = true;
+  var sel = {};
+  s.values.forEach(function(x) {
+    if (s.working[x.v]) { sel[x.v] = true; noneChecked = false; }
+    else allChecked = false;
+  });
+  if (noneChecked) { showToast('At least one value must stay selected', 'error'); return; }
+  var result = allChecked ? null : sel; // null = no filtering
+  svfClose();
+  if (s.onApply) s.onApply(result);
+}
+
+function svfClose() {
+  var o = document.getElementById('svf-overlay');
+  var p = document.getElementById('svf-panel');
+  if (o) o.parentNode.removeChild(o);
+  if (p) p.parentNode.removeChild(p);
+  window._svfState = null;
+}
+</script>

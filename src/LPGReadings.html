@@ -1,0 +1,473 @@
+<!-- LPGReadings.html — Monthly LPG Meter Reading Entry, Payment Tracking & History -->
+<div class="page-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+  <div>
+    <h1 class="page-title">🔥 LPG Meter Readings</h1>
+    <p class="page-subtitle">Enter each unit's meter reading — the amount is calculated automatically from usage and the rate in effect for that month</p>
+  </div>
+</div>
+
+<style>
+  .lpg-filters { display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px; }
+  .lpg-filters select, .lpg-filters input { padding:7px 11px;font-size:13px; }
+  #lpg-table table { border-collapse:collapse;width:100%; }
+  #lpg-table th, #lpg-table td { border:1px solid var(--border-strong, rgba(128,128,128,.35)); padding:7px 9px;vertical-align:middle; }
+  #lpg-table th { background:var(--bg-surface2);color:var(--text-primary);font-weight:800;font-size:11.5px;position:sticky;top:0;z-index:2; }
+  #lpg-table tbody tr:hover td { background:rgba(0,200,150,.06); }
+  #lpg-table tr.lpg-row-active td { background:rgba(0,200,150,.14) !important; }
+  #lpg-table tr.lpg-row-active td:first-child { box-shadow:inset 3px 0 0 var(--accent); }
+  .lpg-uo-row td, .lpg-skip-row td { opacity:.55; }
+  .lpg-pill { display:inline-block;border-radius:10px;padding:2px 8px;font-size:10.5px;font-weight:800;white-space:nowrap; }
+  .lpg-p-read   { background:var(--c-occupied-bg);color:var(--c-occupied-fg); }
+  .lpg-p-pend   { background:var(--c-rejected-bg);color:var(--c-rejected-fg); }
+  .lpg-p-na     { background:var(--bg-surface2);color:var(--text-muted); }
+  .lpg-p-paid   { background:var(--c-occupied-bg);color:var(--c-occupied-fg); }
+  .lpg-p-mismatch { background:rgba(245,158,11,.22);color:#f59e0b; }
+
+  /* Read-only value + hover-reveal pencil — same interaction as the Bank
+     Statement page's Note/Type cells, so editing feels consistent app-wide. */
+  .cell-editable { display:flex;align-items:center;gap:6px;white-space:nowrap; }
+  .cell-editable .edit-pencil {
+    cursor:pointer;opacity:0;font-size:12px;transition:opacity .12s;flex-shrink:0;filter:grayscale(.3);
+  }
+  tr:hover .edit-pencil { opacity:.55; }
+  .edit-pencil:hover { opacity:1 !important; }
+  .add-note-btn, .add-reading-btn, .mark-paid-btn {
+    background:none;border:1px dashed var(--border-strong,rgba(255,255,255,.25));
+    color:var(--text-muted);font-size:11px;padding:3px 10px;border-radius:6px;
+    cursor:pointer;opacity:.6;transition:opacity .12s,border-color .12s;font-family:var(--font-ui);
+  }
+  tr:hover .add-note-btn, tr:hover .add-reading-btn, tr:hover .mark-paid-btn { opacity:1; }
+  .add-note-btn:hover, .add-reading-btn:hover, .mark-paid-btn:hover { border-color:var(--accent);color:var(--accent); }
+  .note-text { font-size:12px;color:var(--text-secondary);max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+</style>
+
+<div class="lpg-filters">
+  <select id="lpg-year" onchange="lpgLoadMonth()"></select>
+  <select id="lpg-month" onchange="lpgLoadMonth()">
+    <option value="1">January</option><option value="2">February</option>
+    <option value="3">March</option><option value="4">April</option>
+    <option value="5">May</option><option value="6">June</option>
+    <option value="7">July</option><option value="8">August</option>
+    <option value="9">September</option><option value="10">October</option>
+    <option value="11">November</option><option value="12">December</option>
+  </select>
+  <select id="lpg-filter" onchange="lpgRender()">
+    <option value="">All Units</option>
+    <option value="pending">Pending Reading</option>
+    <option value="read">Reading Taken</option>
+    <option value="paid">Paid</option>
+    <option value="unpaid">Not Paid</option>
+    <option value="mismatch">Amount Mismatch</option>
+    <option value="uo">Unoccupied</option>
+    <option value="own">Own Cylinder</option>
+    <option value="notusing">Not Using</option>
+  </select>
+  <input id="lpg-search" placeholder="🔎 Search unit or owner…" oninput="lpgRender()" style="min-width:180px;">
+  <span id="lpg-rate-note" style="font-size:12px;color:var(--text-muted);margin-left:auto;"></span>
+</div>
+
+<div id="lpg-stats" class="stats-grid" style="margin-bottom:14px;"><div class="loading"><div class="spinner"></div></div></div>
+
+<div class="card" style="margin:0;">
+  <div class="card-body" style="padding:0;">
+    <div class="table-wrap" style="max-height:68vh;overflow:auto;" id="lpg-table"></div>
+  </div>
+</div>
+
+<script>
+var lpgUnits = [];         // all 136 units (id, tower, occupancy, owner name, lpg_mode)
+var lpgMonthData = {};     // unit_id -> saved reading object for the selected month
+var lpgActiveUnit = '';
+var lpgUOMarkers = {}; // unit_id -> true, for THIS month specifically (Mark UO on Fees Received)
+var lpgTenantByMonth = {}; // unit_id -> { name, move_in_date, move_out_date } — WHO lived there that month
+
+function lpgPageInit() {
+  // Always refetch the unit list — occupancy/mode flags may have changed
+  // in the Unit Profile since the last visit to this page.
+  var now = new Date();
+  var ySel = document.getElementById('lpg-year');
+  var years = []; for (var y = now.getFullYear(); y >= 2023; y--) years.push(y);
+  ySel.innerHTML = years.map(function(y){ return '<option value="'+y+'">'+y+'</option>'; }).join('');
+  ySel.value = String(now.getFullYear());
+  document.getElementById('lpg-month').value = String(now.getMonth() + 1);
+
+  google.script.run.withSuccessHandler(function(r) {
+    var d = (r && r.success && r.data) ? r.data : {};
+    var units = d.units || [], owners = d.owners || [];
+    var ownerBy = {}; owners.forEach(function(o){ if (!ownerBy[o.u]) ownerBy[o.u] = o; });
+    lpgUnits = units.map(function(u) {
+      var ow = ownerBy[u.id];
+      return { id: u.id, tw: u.tw, occ: u.occ, mode: u.lpg_mode || 'Using', owner: ow && ow.n ? String(ow.n).split('/')[0] : '' };
+    }).sort(function(a,b){ return a.id < b.id ? -1 : 1; });
+    lpgLoadMonth();
+  }).withFailureHandler(function(e) {
+    document.getElementById('lpg-table').innerHTML = '<div style="color:var(--c-rejected-fg);padding:16px;">Error: ' + e + '</div>';
+  }).doPost_internal('dashboard.data', {});
+}
+
+function lpgFetchUOMarkers(year, month) {
+  var key = year + '-' + (month < 10 ? '0' + month : month);
+  google.script.run.withSuccessHandler(function(r) {
+    lpgUOMarkers = {};
+    var list = (r && r.success && r.data) ? r.data : [];
+    list.forEach(function(uid) { lpgUOMarkers[String(uid).toUpperCase()] = true; });
+    lpgRender();
+  }).withFailureHandler(function() { lpgUOMarkers = {}; lpgRender(); })
+    .doPost_internal('payments.getUOUnits', { payment_type: 'LPG', month: key });
+
+  // Who actually lived in each unit THIS month — residents change, so this
+  // is re-fetched per month rather than using a single "current tenant" list.
+  google.script.run.withSuccessHandler(function(r) {
+    lpgTenantByMonth = (r && r.success && r.data) ? r.data : {};
+    lpgRender();
+  }).withFailureHandler(function() { lpgTenantByMonth = {}; })
+    .doPost_internal('tenants.getResidentByMonth', { year: year, month: month });
+}
+
+function lpgLoadMonth() {
+  var year = Number(document.getElementById('lpg-year').value);
+  var month = Number(document.getElementById('lpg-month').value);
+  document.getElementById('lpg-table').innerHTML = loadingHtml('Loading readings…');
+  google.script.run.withSuccessHandler(function(r) {
+    lpgMonthData = (r && r.success && r.data) ? r.data : {};
+    lpgFetchUOMarkers(year, month);
+  }).withFailureHandler(function(e) {
+    document.getElementById('lpg-table').innerHTML = '<div style="color:var(--c-rejected-fg);padding:16px;">Error: ' + e + '</div>';
+  }).doPost_internal('lpg.getMonth', { year: year, month: month });
+
+  google.script.run.withSuccessHandler(function(r) {
+    var rate = (r && r.success && r.data) ? r.data : null;
+    var note = document.getElementById('lpg-rate-note');
+    if (note && rate) note.textContent = 'Rate for this month: ' + rate.conv_factor + ' Kg/NM³ × ₹' + rate.price_per_kg + '/Kg';
+  }).doPost_internal('lpg.rateFor', { year: year, month: month });
+}
+
+// Combined status for THIS specific month:
+// 1. An explicit "Mark UO" marker for this month (set on Fees Received)
+//    always wins — this is what makes Jan vacant / Feb occupied possible,
+//    independent of whatever the unit's CURRENT blanket flag says today.
+// 2. Own Cylinder / Not Using are unit-level modes, not month-specific.
+// 3. Otherwise fall back to the unit's current blanket Occupancy flag —
+//    for a unit that's simply been vacant with no per-month markers set.
+function lpgStatus(u, d) {
+  if (lpgUOMarkers[u.id]) return 'uo';
+  if (u.mode === 'Own Cylinder') return 'own';
+  if (u.mode === 'Not Using') return 'notusing';
+  if (u.occ === 'Unoccupied') return 'uo';
+  return d ? 'read' : 'pending';
+}
+
+function lpgRender() {
+  var q = (document.getElementById('lpg-search').value || '').toLowerCase();
+  var filter = document.getElementById('lpg-filter').value;
+
+  var totalAmount = 0, totalPaid = 0, readCount = 0, pendingCount = 0, uoCount = 0, ownCount = 0, notUsingCount = 0;
+  var towerAUsers = 0, towerBUsers = 0;
+  var rows = '';
+
+  for (var i = 0; i < lpgUnits.length; i++) {
+    var u = lpgUnits[i];
+    var d = lpgMonthData[u.id] || null;
+    var st = lpgStatus(u, d);
+
+    if (st === 'uo') uoCount++;
+    else if (st === 'own') ownCount++;
+    else if (st === 'notusing') notUsingCount++;
+    else {
+      if (u.tw === 'A') towerAUsers++; else towerBUsers++;
+      if (st === 'read') { readCount++; totalAmount += Number(d.amount) || 0; if (d.paid_amount !== null) totalPaid += Number(d.paid_amount) || 0; }
+      else pendingCount++;
+    }
+
+    var mismatch = d && d.paid_amount !== null && Math.abs(d.paid_amount - d.amount) > 0.5;
+    var isPaid = d && d.payment_date;
+
+    var tnName = (lpgTenantByMonth[u.id] && lpgTenantByMonth[u.id].name) || '';
+    if (q && u.id.toLowerCase().indexOf(q) === -1 && u.owner.toLowerCase().indexOf(q) === -1 && tnName.toLowerCase().indexOf(q) === -1) continue;
+    if (filter === 'pending'  && st !== 'pending') continue;
+    if (filter === 'read'     && st !== 'read') continue;
+    if (filter === 'uo'       && st !== 'uo') continue;
+    if (filter === 'own'      && st !== 'own') continue;
+    if (filter === 'notusing' && st !== 'notusing') continue;
+    if (filter === 'paid'     && !isPaid) continue;
+    if (filter === 'unpaid'   && !(st === 'read' && !isPaid)) continue;
+    if (filter === 'mismatch' && !mismatch) continue;
+
+    var skip = (st === 'uo' || st === 'own' || st === 'notusing');
+    var rowClass = skip ? 'lpg-skip-row' : '';
+    if (lpgActiveUnit === u.id) rowClass += ' lpg-row-active';
+
+    var statusPill = st === 'read' ? '<span class="lpg-pill lpg-p-read">Read</span>'
+                    : st === 'pending' ? '<span class="lpg-pill lpg-p-pend">Pending</span>'
+                    : st === 'uo' ? '<span class="lpg-pill lpg-p-na">UO</span>'
+                    : st === 'own' ? '<span class="lpg-pill lpg-p-na">Own Cylinder</span>'
+                    : '<span class="lpg-pill lpg-p-na">Not Using</span>';
+
+    rows += '<tr id="lpg-row-' + u.id + '" class="' + rowClass + '" onclick="lpgSelectRow(\'' + u.id + '\')">' +
+      '<td style="font-size:11px;color:var(--text-muted)">' + (i + 1) + '</td>' +
+      '<td><strong style="color:var(--accent);cursor:pointer" onclick="event.stopPropagation();lpgSelectRow(\'' + u.id + '\');openUnitProfile(\'' + u.id + '\')">' + u.id + '</strong>' +
+        (function() {
+          var tn = lpgTenantByMonth[u.id];
+          if (tn && tn.name) return '<div style="font-size:10.5px;color:var(--text-muted)" title="Resident this month">' + lpgE(tn.name) + '</div>';
+          if (u.owner) return '<div style="font-size:10.5px;color:var(--text-muted)" title="No resident on file for this month — showing owner">' + lpgE(u.owner) + ' (owner)</div>';
+          return '';
+        })() + '</td>' +
+      '<td>' + statusPill + '</td>';
+
+    if (skip) {
+      rows += '<td colspan="7" style="color:var(--text-muted);font-size:11.5px;">' +
+        (st === 'uo' ? 'Unit is Unoccupied — no LPG reading needed.' : st === 'own' ? 'Uses own cylinder — excluded from meter billing.' : 'Not using LPG — excluded from meter billing.') +
+        '</td>';
+    } else if (!d) {
+      // No reading yet — a single call-to-action, no clutter.
+      rows += '<td colspan="7"><button class="add-reading-btn" onclick="event.stopPropagation();lpgOpenReadingEdit(\'' + u.id + '\')">+ Enter Reading</button></td>';
+    } else {
+      rows +=
+        '<td style="text-align:right;color:var(--text-muted)">' + d.previous_reading + '</td>' +
+        '<td>' + lpgReadingCell(u.id, d) + '</td>' +
+        '<td>' + lpgDateCell(u.id, d) + '</td>' +
+        '<td style="text-align:right">' + Number(d.consumed).toFixed(3) + '</td>' +
+        '<td style="text-align:right;font-weight:700">₹' + Math.round(d.amount).toLocaleString('en-IN') + '</td>' +
+        '<td>' + lpgPaymentCell(u.id, d, mismatch) + '</td>' +
+        '<td>' + lpgNoteCell(u.id, d.notes) + '</td>';
+    }
+    rows += '</tr>';
+  }
+
+  document.getElementById('lpg-stats').innerHTML =
+    '<div class="stat-card gold"><div class="stat-label">Total LPG Amount</div><div class="stat-value" style="font-size:19px">' + formatRupees(totalAmount) + '</div><div class="stat-sub">' + readCount + ' readings taken</div></div>' +
+    '<div class="stat-card green"><div class="stat-label">Total Paid</div><div class="stat-value" style="font-size:19px">' + formatRupees(totalPaid) + '</div><div class="stat-sub">of amount owed</div></div>' +
+    '<div class="stat-card red"><div class="stat-label">Pending Readings</div><div class="stat-value">' + pendingCount + '</div><div class="stat-sub">still need a reading</div></div>' +
+    '<div class="stat-card info"><div class="stat-label">LPG Users</div><div class="stat-value">' + (towerAUsers + towerBUsers) + '</div><div class="stat-sub">Own cyl./not using: ' + ownCount + '/' + notUsingCount + ' · Unoccupied: ' + uoCount + '</div></div>';
+
+  document.getElementById('lpg-table').innerHTML =
+    '<table><thead><tr><th>#</th><th>Unit / Tenant</th><th>Status</th><th style="text-align:right">Previous Reading</th>' +
+    '<th>Current Reading</th><th>Reading Date</th><th style="text-align:right">Consumed</th><th style="text-align:right">Amount</th>' +
+    '<th>Payment</th><th>Remarks</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function lpgSelectRow(uid) {
+  var prev = document.getElementById('lpg-row-' + lpgActiveUnit);
+  if (prev) prev.className = prev.className.replace('lpg-row-active', '').trim();
+  lpgActiveUnit = uid;
+  var cur = document.getElementById('lpg-row-' + uid);
+  if (cur && cur.className.indexOf('lpg-row-active') === -1) cur.className = (cur.className + ' lpg-row-active').trim();
+}
+
+// ── Reading cells: read-only value + hover pencil, split into their own
+// clearly labelled columns per the association's own template.
+function lpgReadingCell(uid, d) {
+  return '<div class="cell-editable">' +
+    '<span>' + d.current_reading + '</span>' +
+    '<span class="edit-pencil" title="Edit reading" onclick="event.stopPropagation();lpgOpenReadingEdit(\'' + uid + '\')">✏️</span>' +
+    '</div>';
+}
+function lpgDateCell(uid, d) {
+  return '<div class="cell-editable">' +
+    '<span>' + formatDate(d.reading_date) + '</span>' +
+    '<span class="edit-pencil" title="Edit reading" onclick="event.stopPropagation();lpgOpenReadingEdit(\'' + uid + '\')">✏️</span>' +
+    '</div>';
+}
+
+// ── Payment cell: green Paid pill + hover pencil, or a subtle Mark-Paid CTA ──
+function lpgPaymentCell(uid, d, mismatch) {
+  if (d.payment_date) {
+    return '<div class="cell-editable">' +
+      '<span class="lpg-pill lpg-p-paid">✓ Paid ₹' + Math.round(d.paid_amount).toLocaleString('en-IN') + '</span>' +
+      (mismatch ? '<span class="lpg-pill lpg-p-mismatch" title="Calculated ₹' + Math.round(d.amount) + ' vs paid ₹' + Math.round(d.paid_amount) + '">⚠️</span>' : '') +
+      '<span style="color:var(--text-muted);font-size:11px;">' + formatDate(d.payment_date) + '</span>' +
+      '<span class="edit-pencil" title="Edit payment" onclick="event.stopPropagation();lpgOpenPaymentEdit(\'' + uid + '\')">✏️</span>' +
+      '</div>';
+  }
+  return '<button class="mark-paid-btn" onclick="event.stopPropagation();lpgOpenPaymentEdit(\'' + uid + '\')">+ Mark Paid</button>';
+}
+
+// ── Remarks cell: identical pattern to the Bank Statement Note column ──
+function lpgNoteCell(uid, note) {
+  if (note && String(note).trim()) {
+    return '<div class="cell-editable">' +
+      '<span class="note-text" title="' + lpgE(note) + '">' + lpgE(note) + '</span>' +
+      '<span class="edit-pencil" title="Edit remarks" onclick="event.stopPropagation();lpgOpenNoteEdit(\'' + uid + '\')">✏️</span></div>';
+  }
+  return '<button class="add-note-btn" onclick="event.stopPropagation();lpgOpenNoteEdit(\'' + uid + '\')">+ Note</button>';
+}
+
+// ── Popups (each saves immediately — same convention as the rest of OXYGEN) ──
+
+function lpgOpenReadingEdit(uid) {
+  lpgSelectRow(uid);
+  var d = lpgMonthData[uid] || {};
+  var isNew = !lpgMonthData[uid];
+  var isAdmin = (typeof APP_ROLE !== 'undefined' && APP_ROLE === 'admin');
+  // Previous reading normally auto-carries from last month and is read-only —
+  // only an Administrator can override it (e.g. to correct a bad historical
+  // entry), and only with an explicit reason, since it changes the amount.
+  var prevBlock = isNew ? '' :
+    (isAdmin
+      ? '<div class="form-group"><label>Previous Reading <span style="color:#f59e0b;font-weight:700;">⚠️ Admin override</span></label>' +
+          '<input id="lpg-m-previous" type="number" step="0.001" value="' + d.previous_reading + '">' +
+          '<div style="font-size:11px;color:#f59e0b;margin-top:4px;">Changing this recalculates Consumed and Amount for this reading. Please give a reason below.</div>' +
+        '</div>' +
+        '<div class="form-group"><label>Reason for override (required if changed)</label><input id="lpg-m-reason" type="text" placeholder="e.g. corrected a typo from the original import"></div>'
+      : '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Previous reading: <strong>' + d.previous_reading + '</strong></div>');
+  openModal(
+    '<div class="modal-header"><span class="modal-title">🔥 ' + uid + ' — Meter Reading</span>' +
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+      prevBlock +
+      '<div class="form-group"><label>Current Reading</label><input id="lpg-m-current" type="number" step="0.001" value="' + (d.current_reading !== undefined ? d.current_reading : '') + '"></div>' +
+      '<div class="form-group"><label>Reading Date</label><input id="lpg-m-date" type="date" value="' + (d.reading_date || new Date().toISOString().slice(0,10)) + '"></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+        (isNew ? '' : '<button class="btn btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg)" onclick="lpgDeleteReading(\'' + uid + '\',\'' + (d.reading_id || '') + '\')">🗑 Delete Reading</button>') +
+        '<button class="btn btn-accent" onclick="lpgSaveReadingPopup(\'' + uid + '\')">💾 Save</button>' +
+      '</div>' +
+    '</div>'
+  );
+  setTimeout(function(){ var el=document.getElementById('lpg-m-current'); if(el) el.focus(); }, 60);
+}
+
+// Genuinely remove a reading (reverts the unit to Pending for this month) —
+// this is the correct way to "undo" an entry; clearing the field to blank
+// would otherwise be misread as a reading of zero.
+function lpgDeleteReading(uid, readingId) {
+  if (!readingId) { closeModalForce(); return; }
+  if (!confirm('Delete the LPG reading for ' + uid + ' this month? This cannot be undone.')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Reading deleted', 'success'); closeModalForce(); lpgLoadMonth(); }
+    else showToast((r && r.error) || 'Delete failed', 'error');
+  }).withFailureHandler(function(e){ showToast('Error: ' + e, 'error'); })
+    .doPost_internal('lpg.deleteReading', { reading_id: readingId });
+}
+
+function lpgSaveReadingPopup(uid) {
+  var rawVal = (document.getElementById('lpg-m-current')||{}).value;
+  var date = (document.getElementById('lpg-m-date')||{}).value;
+  // Number('') is 0 in JavaScript, not NaN — an emptied field must be
+  // rejected explicitly, or a cleared reading would silently save as "0".
+  if (rawVal === '' || rawVal === null || rawVal === undefined) {
+    showToast('Enter a meter reading, or use Delete to remove this entry', 'error'); return;
+  }
+  var current = Number(rawVal);
+  if (isNaN(current)) { showToast('Enter a valid meter reading', 'error'); return; }
+  var year = Number(document.getElementById('lpg-year').value);
+  var month = Number(document.getElementById('lpg-month').value);
+  var payload = { unit_id: uid, year: year, month: month, current_reading: current, reading_date: date, recorded_by: 'Manager' };
+
+  // Admin-only previous-reading override — requires a stated reason.
+  var prevEl = document.getElementById('lpg-m-previous');
+  if (prevEl) {
+    var d0 = lpgMonthData[uid] || {};
+    var newPrev = Number(prevEl.value);
+    if (!isNaN(newPrev) && newPrev !== d0.previous_reading) {
+      var reason = (document.getElementById('lpg-m-reason')||{}).value || '';
+      if (!reason.trim()) { showToast('Please give a reason for overriding the previous reading', 'error'); return; }
+      payload.previous_reading = newPrev;
+      payload.notes = ((d0.notes ? d0.notes + ' | ' : '') + '⚠️ Previous reading manually set to ' + newPrev + ' by admin: ' + reason);
+    }
+  }
+  showToast('Saving…', '');
+  doPostWithHistoryConfirm('lpg.saveReading', payload,
+    function(r) {
+      if (r && r.success) { showToast('Reading saved — ₹' + Math.round(r.data.amount).toLocaleString('en-IN'), 'success'); closeModalForce(); lpgSelectRow(uid); lpgLoadMonth(); }
+      else showToast((r && r.error) || 'Save failed', 'error');
+    },
+    function(e){ showToast('Error: ' + e, 'error'); }
+  );
+}
+
+function lpgOpenPaymentEdit(uid) {
+  lpgSelectRow(uid);
+  var d = lpgMonthData[uid] || {};
+  openModal(
+    '<div class="modal-header"><span class="modal-title">💰 ' + uid + ' — LPG Payment</span>' +
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+      '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Amount owed (calculated): <strong>₹' + Math.round(d.amount).toLocaleString('en-IN') + '</strong></div>' +
+      '<div class="form-group"><label>Amount Paid (₹)</label><input id="lpg-p-amount" type="number" value="' + (d.paid_amount !== null && d.paid_amount !== undefined ? d.paid_amount : Math.round(d.amount)) + '"></div>' +
+      '<div class="form-group"><label>Payment Date</label><input id="lpg-p-date" type="date" value="' + (d.payment_date || new Date().toISOString().slice(0,10)) + '"></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+        (d.payment_date ? '<button class="btn btn-outline" onclick="lpgClearPayment(\'' + uid + '\')">Mark Unpaid</button>' : '') +
+        '<button class="btn btn-accent" onclick="lpgSavePaymentPopup(\'' + uid + '\')">💾 Save</button>' +
+      '</div>' +
+    '</div>'
+  );
+  setTimeout(function(){ var el=document.getElementById('lpg-p-amount'); if(el) el.focus(); }, 60);
+}
+
+// Every payment/remarks-only save re-sends the reading's OWN stored rate and
+// values unchanged, so editing payment info can never silently recompute
+// the amount from a different (e.g. today's) rate.
+function _lpgBasePayload(uid) {
+  var d = lpgMonthData[uid];
+  return {
+    unit_id: uid, year: d.year, month: d.month,
+    current_reading: d.current_reading, previous_reading: d.previous_reading,
+    reading_date: d.reading_date, conv_factor: d.conv_factor, price_per_kg: d.price_per_kg,
+    paid_amount: d.paid_amount, payment_date: d.payment_date, notes: d.notes,
+    recorded_by: 'Manager'
+  };
+}
+
+function lpgSavePaymentPopup(uid) {
+  var amount = Number((document.getElementById('lpg-p-amount')||{}).value);
+  var date = (document.getElementById('lpg-p-date')||{}).value;
+  if (isNaN(amount) || !date) { showToast('Enter a valid amount and date', 'error'); return; }
+  var payload = _lpgBasePayload(uid);
+  payload.paid_amount = amount; payload.payment_date = date;
+  showToast('Saving…', '');
+  doPostWithHistoryConfirm('lpg.saveReading', payload,
+    function(r) {
+      if (r && r.success) { showToast('Payment recorded', 'success'); closeModalForce(); lpgSelectRow(uid); lpgLoadMonth(); }
+      else showToast((r && r.error) || 'Save failed', 'error');
+    },
+    function(e){ showToast('Error: ' + e, 'error'); }
+  );
+}
+
+function lpgClearPayment(uid) {
+  var payload = _lpgBasePayload(uid);
+  payload.paid_amount = ''; payload.payment_date = '';
+  doPostWithHistoryConfirm('lpg.saveReading', payload,
+    function(r) {
+      if (r && r.success) { showToast('Marked unpaid', 'success'); closeModalForce(); lpgSelectRow(uid); lpgLoadMonth(); }
+      else showToast((r && r.error) || 'Failed', 'error');
+    }
+  );
+}
+
+function lpgOpenNoteEdit(uid) {
+  lpgSelectRow(uid);
+  var d = lpgMonthData[uid] || {};
+  openModal(
+    '<div class="modal-header"><span class="modal-title">📝 ' + uid + ' — Remarks</span>' +
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+      '<div class="form-group"><label>Remarks for this reading</label>' +
+        '<textarea id="lpg-note-ta" rows="4" style="width:100%;resize:vertical" placeholder="e.g. Resident out of town, will pay next month">' + lpgE(d.notes || '') + '</textarea></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+        (d.notes ? '<button class="btn btn-outline" onclick="lpgSaveNote(\'' + uid + '\',true)">Delete</button>' : '') +
+        '<button class="btn btn-accent" onclick="lpgSaveNote(\'' + uid + '\',false)">💾 Save</button>' +
+      '</div>' +
+    '</div>'
+  );
+  setTimeout(function(){ var ta=document.getElementById('lpg-note-ta'); if(ta) ta.focus(); }, 60);
+}
+
+function lpgSaveNote(uid, del) {
+  var payload = _lpgBasePayload(uid);
+  payload.notes = del ? '' : ((document.getElementById('lpg-note-ta')||{}).value || '');
+  doPostWithHistoryConfirm('lpg.saveReading', payload,
+    function(r) {
+      if (r && r.success) { showToast(del ? 'Remarks removed' : 'Remarks saved', 'success'); closeModalForce(); lpgSelectRow(uid); lpgLoadMonth(); }
+      else showToast((r && r.error) || 'Failed', 'error');
+    }
+  );
+}
+
+function lpgE(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>

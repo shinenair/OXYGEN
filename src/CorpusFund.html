@@ -1,0 +1,319 @@
+<!-- CorpusFund.html — Admin-only. Every route this page calls is
+     server-side gated to Administrators, independent of this page
+     being hidden from the nav for everyone else. -->
+
+<style>
+  .cf-table { border-collapse: collapse; }
+  .cf-table th, .cf-table td { border: 1px solid var(--border-strong, rgba(128,128,128,.35)); padding: 5px 8px; }
+</style>
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">🏦 Corpus Fund</h1>
+    <p class="page-subtitle">CDOA's Fixed Deposits with IOB — balances compute themselves from each deposit's own statement of account. Administrators only.</p>
+  </div>
+  <button class="btn btn-outline btn-sm" onclick="cfLoad(true)">🔄 Refresh</button>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div id="cf-status" style="margin-bottom:10px;"></div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:20px;">
+      <div style="border:1px solid var(--border,rgba(128,128,128,.3));border-radius:10px;padding:14px 16px;">
+        <div style="font-family:var(--font-display);font-weight:700;font-size:14px;margin-bottom:10px;">TOTAL CORPUS FUND CDOA OWES</div>
+        <div id="cf-owed-body"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+      <div style="border:1px solid var(--border,rgba(128,128,128,.3));border-radius:10px;padding:14px 16px;">
+        <div style="font-family:var(--font-display);font-weight:700;font-size:14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+          <span>TOTAL CORPUS FUND CDOA RECEIVED</span>
+          <button class="btn btn-xs btn-accent" onclick="cfAddReceivedRow()">➕ Add Year</button>
+        </div>
+        <div id="cf-received-body"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;margin:8px 0 14px;">
+      <div style="font-family:var(--font-display);font-size:17px;font-weight:700;flex:1;padding-bottom:6px;border-bottom:2px solid var(--gold,#f59e0b);">💰 Fixed Deposits</div>
+      <button class="btn btn-accent btn-sm" onclick="cfOpenAddFD()">➕ Add New Fixed Deposit</button>
+    </div>
+
+    <div id="cf-fds-body"><div class="loading"><div class="spinner"></div></div></div>
+
+    <div id="cf-grand-total" style="margin-top:16px;"></div>
+  </div>
+</div>
+
+<script>
+var cfData = null; // { owed, received, fds: { fds, grand_total, grand_as_of } }
+
+function cfE(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function cfShowStatus(msg, type) {
+  var el = document.getElementById('cf-status');
+  if (!el) return;
+  if (!msg) { el.innerHTML = ''; return; }
+  var bg = type === 'success' ? 'var(--c-verified-bg)' : type === 'error' ? 'var(--c-rejected-bg)' : 'var(--bg-surface2)';
+  var fg = type === 'success' ? 'var(--c-verified-fg)' : type === 'error' ? 'var(--c-rejected-fg)' : 'var(--text-secondary)';
+  el.innerHTML = '<div style="background:' + bg + ';color:' + fg + ';padding:8px 12px;border-radius:6px;font-size:12.5px;">' + msg + '</div>';
+}
+
+function cfLoad(isManualRefresh) {
+  if (isManualRefresh) cfShowStatus('⏳ Loading…', '');
+  var pending = 3, results = {};
+  function done() { pending--; if (pending === 0) { cfData = results; cfRenderOwed(); cfRenderReceived(); cfRenderFDs(); cfShowStatus('', ''); } }
+
+  google.script.run.withSuccessHandler(function(r) {
+    results.owed = (r && r.success) ? r.data : { flats_owed: 136, amount_per_flat: 10000 };
+    done();
+  }).withFailureHandler(function(e) { cfShowStatus('❌ ' + e, 'error'); results.owed = {}; done(); })
+    .doPost_internal('corpus.getOwed', {});
+
+  google.script.run.withSuccessHandler(function(r) {
+    results.received = (r && r.success) ? r.data : [];
+    done();
+  }).withFailureHandler(function(e) { cfShowStatus('❌ ' + e, 'error'); results.received = []; done(); })
+    .doPost_internal('corpus.getReceived', {});
+
+  google.script.run.withSuccessHandler(function(r) {
+    results.fds = (r && r.success) ? r.data : { fds: [], grand_total: 0, grand_as_of: '' };
+    done();
+  }).withFailureHandler(function(e) { cfShowStatus('❌ ' + e, 'error'); results.fds = { fds: [], grand_total: 0, grand_as_of: '' }; done(); })
+    .doPost_internal('corpus.getAllFDs', {});
+}
+
+// ── Owed summary ──
+function cfRenderOwed() {
+  var o = cfData.owed;
+  var total = (o.flats_owed || 0) * (o.amount_per_flat || 0);
+  document.getElementById('cf-owed-body').innerHTML =
+    '<div style="display:flex;gap:10px;margin-bottom:8px;">' +
+      '<div style="flex:1;"><label style="font-size:11px;color:var(--text-muted);">No. of Flats</label>' +
+        '<input id="cf-owed-flats" type="number" value="' + (o.flats_owed || 0) + '" style="width:100%;padding:6px 8px;font-size:13px;" onchange="cfSaveOwed()"></div>' +
+      '<div style="flex:1;"><label style="font-size:11px;color:var(--text-muted);">Amount / Flat (₹)</label>' +
+        '<input id="cf-owed-rate" type="number" value="' + (o.amount_per_flat || 0) + '" style="width:100%;padding:6px 8px;font-size:13px;" onchange="cfSaveOwed()"></div>' +
+    '</div>' +
+    '<div style="font-size:15px;font-weight:800;">Total: ' + formatRupees(total) + '</div>';
+}
+
+function cfSaveOwed() {
+  var flats = Number(document.getElementById('cf-owed-flats').value) || 0;
+  var rate = Number(document.getElementById('cf-owed-rate').value) || 0;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Saved', 'success'); cfLoad(); } else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('corpus.setOwed', { flats_owed: flats, amount_per_flat: rate });
+}
+
+// ── Received-by-year table ──
+function cfRenderReceived() {
+  var rows = cfData.received;
+  var h = '<table class="cf-table" style="width:100%;font-size:12.5px;"><thead><tr><th style="text-align:left;">Year</th><th style="text-align:right;">Flats</th><th style="text-align:right;">₹/Flat</th><th style="text-align:right;">Total</th><th></th></tr></thead><tbody>';
+  var grandFlats = 0, grandTotal = 0;
+  rows.forEach(function(r) {
+    var rowTotal = r.flats_paid * r.amount_per_flat;
+    grandFlats += r.flats_paid; grandTotal += rowTotal;
+    h += '<tr><td>' + cfE(r.year) + '</td><td style="text-align:right;">' + r.flats_paid + '</td>' +
+      '<td style="text-align:right;">' + formatRupees(r.amount_per_flat) + '</td>' +
+      '<td style="text-align:right;font-weight:700;">' + formatRupees(rowTotal) + '</td>' +
+      '<td style="white-space:nowrap;"><button class="btn btn-xs btn-outline" onclick="cfEditReceivedRow(\'' + r.row_id + '\')">✏️</button> ' +
+      '<button class="btn btn-xs btn-outline" style="color:var(--c-rejected-fg);" onclick="cfDeleteReceivedRow(\'' + r.row_id + '\')">🗑</button></td></tr>';
+  });
+  h += '<tr style="font-weight:800;border-top:2px solid var(--border,rgba(128,128,128,.3));"><td>TOTAL</td><td style="text-align:right;">' + grandFlats + '</td><td></td>' +
+    '<td style="text-align:right;">' + formatRupees(grandTotal) + '</td><td></td></tr>';
+  h += '</tbody></table>';
+  if (!rows.length) h = '<div style="color:var(--text-muted);font-size:12.5px;">No years recorded yet — click "Add Year" above.</div>';
+  document.getElementById('cf-received-body').innerHTML = h;
+}
+
+function cfAddReceivedRow() {
+  var year = prompt('Year (e.g. "2024" or "2022-23"):');
+  if (!year) return;
+  var flats = prompt('Number of flats that paid in ' + year + ':');
+  if (flats === null) return;
+  var rate = prompt('Amount per flat (₹) for ' + year + ':', '10000');
+  if (rate === null) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Added', 'success'); cfLoad(); } else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('corpus.addReceivedRow', { year: year, flats_paid: Number(flats) || 0, amount_per_flat: Number(rate) || 0 });
+}
+
+function cfEditReceivedRow(rowId) {
+  var r = null;
+  cfData.received.forEach(function(x) { if (x.row_id === rowId) r = x; });
+  if (!r) return;
+  var year = prompt('Year:', r.year); if (year === null) return;
+  var flats = prompt('Flats paid:', r.flats_paid); if (flats === null) return;
+  var rate = prompt('Amount per flat (₹):', r.amount_per_flat); if (rate === null) return;
+  google.script.run.withSuccessHandler(function(res) {
+    if (res && res.success) { showToast('Saved', 'success'); cfLoad(); } else showToast((res && res.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('corpus.updateReceivedRow', { row_id: rowId, year: year, flats_paid: Number(flats) || 0, amount_per_flat: Number(rate) || 0 });
+}
+
+function cfDeleteReceivedRow(rowId) {
+  if (!confirm('Delete this year\'s row?')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Deleted', 'success'); cfLoad(); } else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('corpus.deleteReceivedRow', { row_id: rowId });
+}
+
+// ── Fixed Deposits ──
+function cfRenderFDs() {
+  var d = cfData.fds;
+  var body = document.getElementById('cf-fds-body');
+  if (!d.fds.length) { body.innerHTML = '<div style="color:var(--text-muted);padding:14px;">No Fixed Deposits yet — click "➕ Add New Fixed Deposit" above.</div>'; document.getElementById('cf-grand-total').innerHTML = ''; return; }
+
+  var h = '';
+  d.fds.forEach(function(fd) {
+    h += '<div style="border:1px solid var(--border,rgba(128,128,128,.3));border-radius:10px;padding:14px 16px;margin-bottom:14px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">' +
+        '<strong style="font-size:14.5px;">' + cfE(fd.label) + (fd.bank_name ? ' — ' + cfE(fd.bank_name) : '') + '</strong>' +
+        '<span class="pill" style="background:' + (fd.status === 'Active' ? 'rgba(16,185,129,.15)' : 'rgba(100,116,139,.15)') + ';color:' + (fd.status === 'Active' ? '#10b981' : '#64748b') + ';font-weight:700;font-size:10.5px;">' + cfE(fd.status) + '</span>' +
+        '<span style="margin-left:auto;"></span>' +
+        '<button class="btn btn-xs btn-outline" onclick="cfOpenEditFD(\'' + fd.fd_id + '\')">✏️ Edit</button>' +
+        '<button class="btn btn-xs btn-outline" style="color:var(--c-rejected-fg);" onclick="cfDeleteFD(\'' + fd.fd_id + '\',\'' + cfE(fd.label) + '\')">🗑 Delete</button>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;font-size:12.5px;margin-bottom:12px;">' +
+        '<div><div style="color:var(--text-muted);font-size:10.5px;">AMOUNT</div><strong>' + formatRupees(fd.amount) + '</strong></div>' +
+        '<div><div style="color:var(--text-muted);font-size:10.5px;">DEPOSIT DATE</div><strong>' + cfE(formatDate(fd.deposit_date)) + '</strong></div>' +
+        '<div><div style="color:var(--text-muted);font-size:10.5px;">MATURITY DATE</div><strong>' + cfE(formatDate(fd.maturity_date)) + '</strong></div>' +
+        '<div><div style="color:var(--text-muted);font-size:10.5px;">INTEREST RATE</div><strong>' + fd.interest_rate + '%</strong></div>' +
+      '</div>' +
+      '<div style="font-size:12.5px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;">' +
+        '<span style="flex:1;">📋 Statement of Account</span>' +
+        '<button class="btn btn-xs btn-accent" onclick="cfOpenAddLine(\'' + fd.fd_id + '\')">➕ Add line</button>' +
+      '</div>';
+    if (!fd.lines.length) {
+      h += '<div style="color:var(--text-muted);font-size:11.5px;">No entries yet.</div>';
+    } else {
+      h += '<table class="cf-table" style="width:100%;font-size:12px;"><thead><tr><th style="text-align:left;">#</th><th style="text-align:left;">Date</th><th style="text-align:left;">Description</th><th style="text-align:right;">Amount</th><th></th></tr></thead><tbody>';
+      fd.lines.forEach(function(l, i) {
+        var isNeg = (l.description === 'Withdrawal');
+        h += '<tr><td>' + (i + 1) + '</td><td style="white-space:nowrap;">' + cfE(formatDate(l.date)) + '</td><td>' + cfE(l.description) + '</td>' +
+          '<td style="text-align:right;color:' + (isNeg ? 'var(--c-rejected-fg)' : 'inherit') + ';">' + (isNeg ? '−' : '') + formatRupees(l.amount) + '</td>' +
+          '<td><button class="btn btn-xs btn-outline" style="color:var(--c-rejected-fg);" onclick="cfDeleteLine(\'' + l.line_id + '\',\'' + fd.fd_id + '\')">🗑</button></td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+    h += '<div style="margin-top:8px;font-size:13px;font-weight:800;">Savings Amount as of ' + cfE(formatDate(fd.as_of)) + ': ' + formatRupees(fd.balance) + '</div>';
+    h += '</div>';
+  });
+  body.innerHTML = h;
+
+  document.getElementById('cf-grand-total').innerHTML =
+    '<div style="background:var(--bg-surface2);border-radius:10px;padding:16px 20px;font-size:16px;font-weight:800;text-align:right;">' +
+      'TOTAL SAVINGS AMOUNT as of ' + cfE(formatDate(d.grand_as_of)) + ': ' + formatRupees(d.grand_total) +
+    '</div>';
+}
+
+function cfOpenAddFD() {
+  openModal('<div class="modal-header"><span class="modal-title">➕ Add New Fixed Deposit</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">' +
+    cfFdForm(null) +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+    '<button class="btn btn-accent" onclick="cfSaveNewFD()">💾 Add</button></div></div>');
+}
+
+function cfFdForm(fd) {
+  fd = fd || {};
+  return '<div class="form-group"><label>Label</label><input id="cff-label" type="text" value="' + cfE(fd.label || '') + '" placeholder="e.g. CDOA Fixed Deposit-03" style="width:100%;"></div>' +
+    '<div class="form-group"><label>Bank Name</label><input id="cff-bank" type="text" value="' + cfE(fd.bank_name || 'Indian Overseas Bank') + '" style="width:100%;"></div>' +
+    '<div class="form-row" style="display:flex;gap:10px;">' +
+      '<div class="form-group" style="flex:1;"><label>Amount (₹)</label><input id="cff-amount" type="number" value="' + (fd.amount || '') + '" style="width:100%;"></div>' +
+      '<div class="form-group" style="flex:1;"><label>Interest Rate (%)</label><input id="cff-rate" type="number" step="0.01" value="' + (fd.interest_rate || '') + '" style="width:100%;"></div>' +
+    '</div>' +
+    '<div class="form-row" style="display:flex;gap:10px;">' +
+      '<div class="form-group" style="flex:1;"><label>Deposit Date</label><input id="cff-deposit" type="date" value="' + (fd.deposit_date || '') + '" style="width:100%;"></div>' +
+      '<div class="form-group" style="flex:1;"><label>Maturity Date</label><input id="cff-maturity" type="date" value="' + (fd.maturity_date || '') + '" style="width:100%;"></div>' +
+    '</div>' +
+    '<div class="form-group"><label>Status</label><select id="cff-status" style="width:100%;">' +
+      ['Active','Matured','Renewed','Closed'].map(function(s) { return '<option value="' + s + '"' + (s === (fd.status||'Active') ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
+    '</select></div>';
+}
+
+function cfReadFdForm() {
+  function gv(id) { return (document.getElementById(id) || {}).value || ''; }
+  return { label: gv('cff-label'), bank_name: gv('cff-bank'), amount: Number(gv('cff-amount')) || 0,
+           interest_rate: Number(gv('cff-rate')) || 0, deposit_date: gv('cff-deposit'), maturity_date: gv('cff-maturity'),
+           status: gv('cff-status') };
+}
+
+function cfSaveNewFD() {
+  var d = cfReadFdForm();
+  if (!d.label.trim()) { showToast('Label is required', 'error'); return; }
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Fixed Deposit added', 'success'); closeModalForce(); cfLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('corpus.addFD', d);
+}
+
+function cfOpenEditFD(fdId) {
+  var fd = null;
+  cfData.fds.fds.forEach(function(x) { if (x.fd_id === fdId) fd = x; });
+  if (!fd) return;
+  openModal('<div class="modal-header"><span class="modal-title">✏️ Edit — ' + cfE(fd.label) + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">' +
+    cfFdForm(fd) +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+    '<button class="btn btn-accent" onclick="cfSaveEditFD(\'' + fdId + '\')">💾 Save</button></div></div>');
+}
+
+function cfSaveEditFD(fdId) {
+  var d = cfReadFdForm();
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Saved', 'success'); closeModalForce(); cfLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('corpus.updateFD', (function(){ d.fd_id = fdId; return d; })());
+}
+
+function cfDeleteFD(fdId, label) {
+  if (!confirm('Delete "' + label + '" entirely, including its whole statement of account? This cannot be undone.')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Deleted', 'success'); cfLoad(); } else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('corpus.deleteFD', { fd_id: fdId });
+}
+
+function cfOpenAddLine(fdId) {
+  openModal('<div class="modal-header"><span class="modal-title">➕ Add Statement Line</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">' +
+    '<div class="form-group"><label>Date</label><input id="cfl-date" type="date" style="width:100%;"></div>' +
+    '<div class="form-group"><label>Description</label><select id="cfl-desc" style="width:100%;">' +
+      '<option value="Deposit">Deposit</option><option value="Interest">Interest</option><option value="Withdrawal">Withdrawal</option>' +
+    '</select></div>' +
+    '<div class="form-group"><label>Amount (₹)</label><input id="cfl-amount" type="number" style="width:100%;"></div>' +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+    '<button class="btn btn-accent" onclick="cfSaveLine(\'' + fdId + '\')">💾 Add</button></div></div>');
+}
+
+function cfSaveLine(fdId) {
+  var date = document.getElementById('cfl-date').value;
+  var desc = document.getElementById('cfl-desc').value;
+  var amount = Number(document.getElementById('cfl-amount').value) || 0;
+  if (!date) { showToast('Date is required', 'error'); return; }
+  if (!(amount > 0)) { showToast('Amount must be greater than zero', 'error'); return; }
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Added', 'success'); closeModalForce(); cfLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('corpus.addLine', { fd_id: fdId, date: date, description: desc, amount: amount });
+}
+
+function cfDeleteLine(lineId, fdId) {
+  if (!confirm('Delete this statement line? The balance will recompute without it.')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Deleted', 'success'); cfLoad(); } else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('corpus.deleteLine', { line_id: lineId });
+}
+
+function corpusFundPageInit() { cfLoad(); }
+</script>

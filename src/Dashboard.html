@@ -1,0 +1,482 @@
+<!-- Dashboard.html — Association Overview: Income/Expenses, Occupancy, Tower Diagrams, Defaulters -->
+<div class="page-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+  <div>
+    <h1 class="page-title">📊 Dashboard</h1>
+    <p class="page-subtitle">Confident Daffodils Owners Association — OXYGEN</p>
+  </div>
+  <button class="btn btn-outline btn-sm" onclick="refreshDashboard()">↻ Refresh</button>
+</div>
+
+<div class="dash-top-row" style="margin-bottom:6px;">
+  <div class="dash-filters-block" style="width:340px;">
+    <div style="display:flex;gap:8px;align-items:stretch;">
+      <div id="dash-active-year-banner" style="display:flex;align-items:center;gap:6px;background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:7px 12px;flex:1;box-sizing:border-box;" title="Set from the Settings page">
+        <span style="font-weight:700;font-size:11.5px;white-space:nowrap;">🌐 Active:</span>
+        <span id="dash-active-year-display" style="font-weight:800;font-size:14px;color:var(--accent);">…</span>
+      </div>
+      <select id="dash-year" onchange="dashRender()" style="width:90px;padding:5px 8px;font-size:12px;" title="View a different year on this page (doesn't change the Active Year)"></select>
+    </div>
+  </div>
+  <div class="dash-tiles-block">
+    <div id="dash-tiles-wrap">
+      <div id="dash-tiles" class="dash-tiles">
+        <div class="loading"><div class="spinner"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .dash-filters { display:flex;gap:10px;align-items:center;flex-wrap:wrap; }
+  .dash-filters select { padding:7px 11px;font-size:13px; }
+  .dash-top-row { display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px; }
+  .dash-filters-block { flex:0 0 auto;width:340px;display:flex;flex-direction:column;gap:8px; }
+  .dash-tiles-block { flex:1;min-width:280px; }
+  .dash-search-wrap { position:relative;width:100%; }
+  .dash-search-wrap input { width:100%;padding:8px 12px;font-size:13px; }
+  .dash-search-dd {
+    position:absolute;top:100%;left:0;right:0;z-index:60;background:var(--bg-surface);
+    border:1px solid var(--border-strong,var(--border));border-radius:var(--radius-sm);
+    box-shadow:var(--shadow-md);max-height:300px;overflow:auto;display:none;
+  }
+  .dash-search-item { padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px; }
+  .dash-search-item:hover { background:var(--bg-surface2); }
+  .dash-tiles { display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px; }
+  .dash-main { display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap; }
+  .dash-towers { flex:2;min-width:420px;display:flex;gap:14px;flex-wrap:wrap; }
+  .dash-defaulters { flex:1;min-width:250px; }
+  .twr { flex:1;min-width:200px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px; }
+
+  @media (max-width: 480px) {
+    .dash-filters-block { width:100%; }
+    .dash-towers { min-width:0;width:100%; }
+    .twr { min-width:140px; }
+  }
+  .twr-title { font-weight:800;font-size:13px;text-align:center;margin-bottom:8px;color:var(--text-primary); }
+  .twr-row { display:flex;gap:3px;align-items:center;margin-bottom:3px; }
+  .twr-fl { width:16px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:right;flex-shrink:0; }
+  .twr-cell {
+    flex:1;aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    font-size:11px;font-weight:800;border-radius:6px;cursor:pointer;min-width:0;
+    padding:3px 2px;gap:2px;transition:transform .1s;
+  }
+  .twr-nm {
+    font-size:8px;font-weight:600;opacity:.9;max-width:95%;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;
+  }
+  .twr-cell:hover { transform:scale(1.15);z-index:2;box-shadow:var(--shadow-md); }
+  .tc-paid    { background:var(--c-occupied-bg);color:var(--c-occupied-fg); }
+  .tc-notpaid { background:var(--c-rejected-bg);color:var(--c-rejected-fg); }
+  .twr-def {
+    display:inline-block;background:var(--c-rejected-bg);color:var(--c-rejected-fg);
+    border-radius:10px;padding:1px 9px;font-size:10.5px;font-weight:800;margin-left:8px;
+  }
+  .twr-def.ok { background:var(--c-occupied-bg);color:var(--c-occupied-fg); }
+  .dash-fees { flex:1;min-width:210px;display:flex;flex-direction:column;gap:12px; }
+  .dash-fee-tile {
+    background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-md);
+    padding:12px 16px;
+  }
+  .dash-fee-tile .fee-label { font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:4px; }
+  .dash-fee-tile .fee-value { font-size:20px;font-weight:800;color:var(--text-primary); }
+  .dash-fee-tile .fee-sub   { font-size:10.5px;color:var(--text-muted);margin-top:3px; }
+  .tc-na      { background:var(--bg-surface2);color:var(--text-muted);opacity:.7; }
+  .tc-unreg   { background:rgba(245,158,11,.2);color:#f59e0b; }
+  .dash-legend { display:flex;gap:12px;flex-wrap:wrap;margin:10px 2px 0;font-size:10.5px;color:var(--text-muted); }
+  .dash-legend span { display:inline-flex;align-items:center;gap:5px; }
+  .dash-legend i { width:11px;height:11px;border-radius:3px;display:inline-block; }
+</style>
+
+<div class="dash-top-row" style="margin-bottom:14px;">
+  <!-- Month filter — narrow, aligned with the search box below it -->
+  <div class="dash-filters-block">
+    <div class="dash-filters">
+      <select id="dash-month" onchange="dashRender()">
+        <option value="1">January</option><option value="2">February</option>
+        <option value="3">March</option><option value="4">April</option>
+        <option value="5">May</option><option value="6">June</option>
+        <option value="7">July</option><option value="8">August</option>
+        <option value="9">September</option><option value="10">October</option>
+        <option value="11">November</option><option value="12">December</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Search — now fills the wide area (where tiles used to sit) -->
+  <div class="dash-tiles-block">
+    <div class="dash-search-wrap">
+      <input id="dash-search" placeholder="🔎 Search unit, owner, resident, phone, bank name…"
+        oninput="dashSearch()" onfocus="dashSearch()" onblur="setTimeout(dashSearchHide,180)">
+      <div id="dash-search-dd" class="dash-search-dd"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Towers (payment colour-coded) + vertical fee tiles -->
+<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+  <span style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;">Colour towers by:</span>
+  <select id="dash-def-type" onchange="dashRender()" style="padding:7px 11px;font-size:13px;">
+    <option value="Maintenance">Maintenance Fee</option>
+    <option value="Waste Management">Waste Management Fee</option>
+    <option value="LPG">LPG</option>
+  </select>
+  <span id="dash-twr-caption" style="font-size:12px;color:var(--text-muted);"></span>
+</div>
+<div class="dash-main">
+  <div class="dash-towers">
+    <div class="twr"><div class="twr-title">🏢 TOWER A<span id="dash-def-a"></span></div><div id="dash-twr-a"></div></div>
+    <div class="twr"><div class="twr-title">🏢 TOWER B<span id="dash-def-b"></span></div><div id="dash-twr-b"></div></div>
+  </div>
+  <div class="dash-fees" id="dash-fees"></div>
+</div>
+
+<div class="dash-legend">
+  <span><i style="background:var(--c-verified-bg);border:1px solid var(--c-verified-fg)"></i> Paid</span>
+  <span><i style="background:var(--c-rejected-bg);border:1px solid var(--c-rejected-fg)"></i> Not Paid</span>
+  <span><i style="background:var(--bg-surface2);border:1px solid var(--border)"></i> Unoccupied / N/A</span>
+  <span><i style="background:rgba(245,158,11,.2);border:1px solid #f59e0b"></i> Unregistered</span>
+  <span style="margin-left:auto">Click any unit to open its full profile</span>
+</div>
+
+<script>
+// ── Dashboard state ───────────────────────────────────────────
+var dashData = null;      // payload from dashboard.data
+var dashPayMap = {};      // 'UNIT|type|YYYY-MM' -> amount
+var dashInit = false;
+
+function refreshDashboard() {
+  var tiles = document.getElementById('dash-tiles');
+  if (tiles) tiles.innerHTML = loadingHtml('Loading dashboard…');
+  google.script.run
+    .withSuccessHandler(function(r) {
+      dashData = (r && r.success && r.data) ? r.data : null;
+      if (!dashData) {
+        if (tiles) tiles.innerHTML = emptyHtml('📊','Could not load dashboard data.');
+        return;
+      }
+      dashRenderActiveYearBanner(dashData.activeYear);
+      dashBuildPayMap();
+      dashPopulateFilters();
+      dashRender();
+    })
+    .withFailureHandler(function(e) {
+      if (tiles) tiles.innerHTML = '<div style="color:var(--c-rejected-fg);padding:16px;">Error: ' + e + '</div>';
+    })
+    .doPost_internal('dashboard.data', {});
+}
+
+// The Universal Active Year banner — everyone sees which year the whole
+// app is focused on; only an Administrator gets controls to change it.
+function dashRenderActiveYearBanner(activeYear) {
+  var disp = document.getElementById('dash-active-year-display');
+  if (disp) disp.textContent = activeYear;
+}
+
+var dashUoMap = {};       // 'UNIT|type|YYYY-MM' -> month explicitly marked Unoccupied
+var dashOwnerBy = {};     // unit id -> first owner (for tower tooltips)
+var dashTenantBy = {};    // unit id -> first resident (for tower tooltips)
+function dashBuildPayMap() {
+  dashPayMap = {};
+  dashUoMap  = {};
+  dashOwnerBy = {};
+  dashTenantBy = {};
+  (dashData.owners || []).forEach(function(o) { if (!dashOwnerBy[o.u]) dashOwnerBy[o.u] = o; });
+  (dashData.tenants || []).forEach(function(t) { if (!dashTenantBy[t.u]) dashTenantBy[t.u] = t; });
+  var rows = dashData.payments || [];
+  for (var i = 0; i < rows.length; i++) {
+    var p = rows[i];
+    var k = p.u + '|' + p.t + '|' + p.m;
+    if (p.uo) { dashUoMap[k] = true; continue; }
+    dashPayMap[k] = (dashPayMap[k] || 0) + p.a;
+  }
+}
+
+function dashPopulateFilters() {
+  var now = new Date(), curY = now.getFullYear();
+  var ySel = document.getElementById('dash-year');
+  if (!ySel) return;
+  var years = {};
+  years[curY] = true; years[2023] = true; years[2024] = true; years[2025] = true;
+  for (var k in (dashData.months || {})) { var y = parseInt(k.slice(0,4),10); if (y) years[y] = true; }
+  var list = []; for (var yk in years) list.push(parseInt(yk,10));
+  list.sort(function(a,b){ return b - a; });
+  var prev = ySel.value;
+  var html = '';
+  for (var i = 0; i < list.length; i++) html += '<option value="' + list[i] + '">' + list[i] + '</option>';
+  ySel.innerHTML = html;
+  if (!dashInit) {
+    ySel.value = String(curY);
+    var mSel = document.getElementById('dash-month');
+    if (mSel) mSel.value = String(now.getMonth() + 1);
+    dashInit = true;
+  } else if (prev) { ySel.value = prev; }
+}
+
+function dashKey() {
+  var y = parseInt((document.getElementById('dash-year')||{}).value || (new Date()).getFullYear(), 10);
+  var m = parseInt((document.getElementById('dash-month')||{}).value || ((new Date()).getMonth()+1), 10);
+  return { y: y, m: m, key: y + '-' + (m < 10 ? '0' + m : m) };
+}
+
+// Status of one unit for a type+month: 'paid' | 'notpaid' | 'na' | 'unreg'
+function dashUnitStatus(u, type, y, key) {
+  var k = u.id + '|' + type + '|' + key;
+  if (dashPayMap[k]) return 'paid';                              // actual money always wins
+  if (type !== 'Maintenance' && dashUoMap[k]) return 'na';       // month marked UO — not owed
+  if (type !== 'Maintenance' && u.occ === 'Unoccupied') return 'na';
+  if (u.reg === 'Not-registered') return 'unreg';
+  return 'notpaid';
+}
+
+function dashRender() {
+  if (!dashData) return;
+  var sel  = dashKey();
+  var type = (document.getElementById('dash-def-type')||{}).value || 'Maintenance';
+
+  // ── Tiles ──
+  var mo = (dashData.months || {})[sel.key] || { i:0, e:0 };
+  var ytdI = 0, ytdE = 0;
+  for (var mi = 1; mi <= sel.m; mi++) {
+    var k = sel.y + '-' + (mi < 10 ? '0' + mi : mi);
+    var v = (dashData.months || {})[k];
+    if (v) { ytdI += v.i; ytdE += v.e; }
+  }
+  var occA = 0, totA = 0, occB = 0, totB = 0;
+  (dashData.units || []).forEach(function(u) {
+    if (u.tw === 'A') { totA++; if (u.occ !== 'Unoccupied') occA++; }
+    else              { totB++; if (u.occ !== 'Unoccupied') occB++; }
+  });
+  function feeSum(t) {
+    var s = 0;
+    (dashData.payments || []).forEach(function(p) { if (p.t === t && p.m === sel.key) s += p.a; });
+    return s;
+  }
+  var bal = dashData.balance;
+  var monthName = ['','January','February','March','April','May','June','July','August','September','October','November','December'][sel.m];
+
+  function tile(cls, label, value, sub) {
+    return '<div class="stat-card ' + cls + '"><div class="stat-label">' + label + '</div>' +
+      '<div class="stat-value" style="font-size:19px;">' + value + '</div>' +
+      '<div class="stat-sub">' + sub + '</div></div>';
+  }
+  // Income and Expense each combine Month + YTD into ONE compact tile
+  // (was 4 separate tiles) — frees up a full tile's worth of width/height
+  // for the tower visualization below.
+  function comboTile(cls, label, monthVal, ytdVal) {
+    return '<div class="stat-card ' + cls + '"><div class="stat-label">' + label + ' — ' + monthName + '</div>' +
+      '<div class="stat-value" style="font-size:18px;">' + formatRupees(monthVal) + '</div>' +
+      '<div class="stat-sub">YTD ' + sel.y + ': <strong>' + formatRupees(ytdVal) + '</strong></div></div>';
+  }
+  document.getElementById('dash-tiles').innerHTML =
+    comboTile('green', 'Income', mo.i, ytdI) +
+    comboTile('red',   'Expenses', mo.e, ytdE) +
+    tile('gold',  'IOB Bank Balance', bal ? formatRupees(bal.amount) : '—', bal ? 'as of ' + bal.date : 'import a statement') +
+    tile('info',  'Occupancy', (occA + occB) + '/' + (totA + totB), 'A: ' + occA + '/' + totA + ' · B: ' + occB + '/' + totB) +
+    dashReconTile();
+
+  // ── Vertical fee tiles (right of the towers) ──
+  // Now a real comparison, not just a raw "money in" figure: Expected
+  // (what SHOULD come in this month, from occupied/obligated units at the
+  // current fee rate) vs Collected (from the Payments ledger) vs how many
+  // units are still Pending — reusing the exact same per-unit status
+  // logic (dashUnitStatus) that drives the tower coloring, so this can
+  // never disagree with what the towers themselves show.
+  var feesEl = document.getElementById('dash-fees');
+  if (feesEl) {
+    function feeCounts(t) {
+      var expectedUnits = 0, pendingUnits = 0;
+      (dashData.units || []).forEach(function(u) {
+        var st = dashUnitStatus(u, t, sel.y, sel.key);
+        if (st === 'paid' || st === 'notpaid') expectedUnits++;
+        if (st === 'notpaid') pendingUnits++;
+      });
+      return { expectedUnits: expectedUnits, pendingUnits: pendingUnits };
+    }
+    function feeTile(icon, label, t, expectedAmount, isEstimate) {
+      var c = feeCounts(t);
+      var collected = feeSum(t);
+      var pct = expectedAmount > 0 ? Math.min(100, Math.round((collected / expectedAmount) * 100)) : null;
+      return '<div class="dash-fee-tile">' +
+        '<div class="fee-label">' + icon + ' ' + label + '</div>' +
+        '<div class="fee-value">' + formatRupees(collected) + '</div>' +
+        '<div class="fee-sub">collected of ' + formatRupees(expectedAmount) + ' expected' + (isEstimate ? ' (est.)' : '') + '</div>' +
+        (pct !== null ? '<div style="background:var(--bg-surface2);border-radius:4px;height:5px;margin:4px 0;overflow:hidden;"><div style="background:var(--accent);height:100%;width:' + pct + '%;"></div></div>' : '') +
+        '<div class="fee-sub" style="' + (c.pendingUnits > 0 ? 'color:var(--c-rejected-fg);font-weight:700;' : '') + '">' +
+          (c.pendingUnits > 0 ? '⚠️ ' + c.pendingUnits + ' of ' + c.expectedUnits + ' units pending' : '✅ all ' + c.expectedUnits + ' units paid') +
+        '</div></div>';
+    }
+    var mCounts = feeCounts('Maintenance');
+    var wCounts = feeCounts('Waste Management');
+    var mExpected = mCounts.expectedUnits * (dashData.feeMaintenance || 0);
+    var wExpected = wCounts.expectedUnits * (dashData.feeWaste || 0);
+    feesEl.innerHTML =
+      feeTile('🏠', 'Maintenance Fee', 'Maintenance', mExpected, false) +
+      feeTile('♻️', 'Waste Management', 'Waste Management', wExpected, false) +
+      '<div class="dash-fee-tile" id="dash-fee-lpg">' +
+        '<div class="fee-label">🔥 LPG</div>' +
+        '<div class="fee-value">' + formatRupees(feeSum('LPG')) + '</div>' +
+        '<div class="fee-sub">Loading expected amount…</div></div>';
+
+    // LPG has no flat rate — "expected" is the sum of that month's actual
+    // meter-reading amounts, fetched fresh for whichever month is selected.
+    google.script.run.withSuccessHandler(function(r) {
+      var readings = (r && r.success && r.data) ? r.data : {};
+      var lpgExpected = 0;
+      for (var uid in readings) lpgExpected += Number(readings[uid].amount) || 0;
+      var lpgEl = document.getElementById('dash-fee-lpg');
+      if (lpgEl) lpgEl.outerHTML = feeTile('🔥', 'LPG', 'LPG', lpgExpected, true);
+    }).doPost_internal('lpg.getMonth', { year: sel.y, month: sel.m });
+  }
+
+  // ── Tower graphics ──
+  dashRenderTower('A', 8, 'dash-twr-a', type, sel);
+  dashRenderTower('B', 9, 'dash-twr-b', type, sel);
+
+  // ── Defaulter counts shown on each tower ──
+  var defA = 0, defB = 0;
+  (dashData.units || []).forEach(function(u) {
+    if (dashUnitStatus(u, type, sel.y, sel.key) === 'notpaid') {
+      if (u.tw === 'A') defA++; else defB++;
+    }
+  });
+  var typeLabel = type === 'Maintenance' ? 'Maintenance Fee' : (type === 'Waste Management' ? 'Waste Management Fee' : 'LPG');
+  var badgeA = document.getElementById('dash-def-a');
+  var badgeB = document.getElementById('dash-def-b');
+  if (badgeA) badgeA.innerHTML = defA
+    ? '<span class="twr-def" title="' + defA + ' units have not paid ' + typeLabel + '">🚨 ' + defA + ' defaulters</span>'
+    : '<span class="twr-def ok">✓ all paid</span>';
+  if (badgeB) badgeB.innerHTML = defB
+    ? '<span class="twr-def" title="' + defB + ' units have not paid ' + typeLabel + '">🚨 ' + defB + ' defaulters</span>'
+    : '<span class="twr-def ok">✓ all paid</span>';
+  var cap = document.getElementById('dash-twr-caption');
+  if (cap) cap.innerHTML = typeLabel + ' · ' + monthName + ' ' + sel.y +
+    ' — <strong style="color:' + ((defA + defB) ? 'var(--c-rejected-fg)' : 'var(--c-verified-fg)') + '">' +
+    'Total defaulters: ' + (defA + defB) + '</strong>' +
+    ' <span style="opacity:.75">(A: ' + defA + ' · B: ' + defB + ')</span>';
+}
+
+// Ledger-vs-Bank reconciliation tile — click for the full monthly report.
+function dashReconTile() {
+  var r = (dashData && dashData.recon) || { total: 0, bad: 0, badMonths: [] };
+  var ok = r.total > 0 && r.bad === 0;
+  var cls = r.total === 0 ? 'info' : (ok ? 'green' : 'red');
+  var val = r.total === 0 ? '—' : (ok ? '✅ OK' : '⚠️ ' + r.bad);
+  var sub = r.total === 0 ? 'no bank data yet'
+          : ok ? 'all ' + r.total + ' months match IOB'
+          : 'mismatch: ' + r.badMonths.join(', ');
+  return '<div class="stat-card ' + cls + '" style="cursor:pointer" ' +
+    'title="OXYGEN ledger vs IOB stated balances — click for the month-by-month report" ' +
+    'onclick="if (typeof bankReconcile === \'function\') bankReconcile();">' +
+    '<div class="stat-label">Ledger vs Bank</div>' +
+    '<div class="stat-value" style="font-size:20px">' + val + '</div>' +
+    '<div class="stat-sub">' + sub + '</div></div>';
+}
+
+function dashRenderTower(tower, floors, elId, type, sel) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  // Key by floor + NUMERIC unit number: Sheets stores the seeded '01' as the
+  // number 1, so both '01' and '1' must resolve to the same cell.
+  var byKey = {};
+  (dashData.units || []).forEach(function(u) {
+    if (u.tw !== tower) return;
+    byKey[parseInt(u.fl, 10) + '-' + parseInt(u.num, 10)] = u;
+  });
+  var MAX_FLOORS = 9; // Tower B height — pad shorter towers so floor 1 aligns
+  var h = '';
+  for (var s = MAX_FLOORS; s > floors; s--) {
+    h += '<div class="twr-row" style="visibility:hidden;"><div class="twr-fl">0</div>';
+    for (var x = 0; x < 8; x++) h += '<div class="twr-cell tc-na">000</div>';
+    h += '</div>';
+  }
+  for (var f = floors; f >= 1; f--) {
+    h += '<div class="twr-row"><div class="twr-fl">' + f + '</div>';
+    for (var n = 1; n <= 8; n++) {
+      var u = byKey[f + '-' + n];
+      var label = tower + f + (n < 10 ? '0' + n : String(n));
+      if (!u) { h += '<div class="twr-cell tc-na" title="' + label + '">—</div>'; continue; }
+      var st = dashUnitStatus(u, type, sel.y, sel.key);
+      var cls = st === 'paid' ? 'tc-paid' : st === 'notpaid' ? 'tc-notpaid' : st === 'unreg' ? 'tc-unreg' : 'tc-na';
+      var stLabel = st === 'paid' ? 'Paid' : st === 'notpaid' ? 'NOT paid' : st === 'unreg' ? 'Not-registered' : 'Unoccupied / N-A';
+      var ow = dashOwnerBy[u.id];
+      var tn = dashTenantBy[u.id];
+      var owName = ow && ow.n ? String(ow.n).split('/')[0].replace(/^\s+|\s+$/g, '') : '';
+      var tip = u.id + ' — ' + stLabel +
+        ' | ' + (u.occ === 'Unoccupied' ? 'Unoccupied (UO)' : 'Occupied') +
+        (u.reg === 'Not-registered' ? ' | NOT-REGISTERED' : '') +
+        (owName ? ' | Owner: ' + owName : '') +
+        (tn && tn.n ? ' | Resident: ' + String(tn.n).split('/')[0] : '') +
+        (u.oit === 'Yes' ? ' | Owner lives here' : '');
+      h += '<div class="twr-cell ' + cls + '" onclick="openUnitProfile(\'' + u.id + '\')" ' +
+        'title="' + tip.replace(/"/g, '&quot;') + '">' + f + (n < 10 ? '0' + n : String(n)) +
+        (owName ? '<div class="twr-nm">' + owName.split(' ')[0] + '</div>' : '') + '</div>';
+    }
+    h += '</div>';
+  }
+  el.innerHTML = h;
+}
+
+// ── Search ────────────────────────────────────────────────────
+function dashSearchIndex() {
+  if (dashData._idx) return dashData._idx;
+  var idx = {};
+  (dashData.units || []).forEach(function(u) { idx[u.id] = u.id.toLowerCase() + ' '; });
+  (dashData.owners || []).forEach(function(o) {
+    if (idx[o.u] !== undefined) idx[o.u] += (o.n + ' ' + o.p + ' ' + o.e + ' ' + o.b).toLowerCase() + ' ';
+  });
+  (dashData.tenants || []).forEach(function(t) {
+    if (idx[t.u] !== undefined) idx[t.u] += (t.n + ' ' + t.p + ' ' + t.e + ' ' + t.b).toLowerCase() + ' ';
+  });
+  dashData._idx = idx;
+  return idx;
+}
+
+function dashSearch() {
+  var q  = (document.getElementById('dash-search')||{}).value || '';
+  var dd = document.getElementById('dash-search-dd');
+  if (!dd) return;
+  q = q.trim().toLowerCase();
+  if (!q || !dashData) { dd.style.display = 'none'; return; }
+  var idx = dashSearchIndex();
+  var hits = [];
+  for (var uid in idx) {
+    if (idx[uid].indexOf(q) > -1) { hits.push(uid); if (hits.length >= 10) break; }
+  }
+  if (!hits.length) {
+    dd.innerHTML = '<div class="dash-search-item" style="cursor:default;color:var(--text-muted)">No matches</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  var ownerBy = {}, tenantBy = {};
+  (dashData.owners || []).forEach(function(o) { if (!ownerBy[o.u]) ownerBy[o.u] = o; });
+  (dashData.tenants || []).forEach(function(t) { if (!tenantBy[t.u]) tenantBy[t.u] = t; });
+  var h = '';
+  for (var i = 0; i < hits.length; i++) {
+    var uid = hits[i];
+    var o = ownerBy[uid], t = tenantBy[uid];
+    h += '<div class="dash-search-item" onmousedown="dashSearchGo(\'' + uid + '\')">' +
+      '<strong style="color:var(--accent)">' + uid + '</strong>' +
+      (o ? ' <span style="color:var(--text-secondary)">' + dashE(o.n.split('/')[0]) + '</span>' : '') +
+      (t ? ' <span style="color:var(--text-muted);font-size:11px">· Resident: ' + dashE(t.n.split('/')[0]) + '</span>' : '') +
+      '</div>';
+  }
+  dd.innerHTML = h;
+  dd.style.display = 'block';
+}
+
+function dashSearchGo(unitId) {
+  dashSearchHide();
+  var inp = document.getElementById('dash-search');
+  if (inp) inp.value = '';
+  openUnitProfile(unitId);
+}
+
+function dashSearchHide() {
+  var dd = document.getElementById('dash-search-dd');
+  if (dd) dd.style.display = 'none';
+}
+
+function dashE(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>

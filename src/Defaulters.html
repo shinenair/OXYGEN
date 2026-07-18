@@ -1,0 +1,105 @@
+<!-- Defaulters.html -->
+<div class="page-header">
+  <div>
+    <h1 class="page-title">⚠️ Defaulters</h1>
+    <p class="page-subtitle">Units/tenants with overdue or missing payments</p>
+  </div>
+</div>
+
+<div class="filters-row">
+  <div class="form-group" style="margin:0">
+    <input type="month" id="def-month" style="width:auto;padding:8px 12px;font-size:13px">
+  </div>
+  <button class="btn btn-primary btn-sm" onclick="loadDefaulters()">Check Defaulters</button>
+</div>
+
+<div id="def-display">
+  <div style="text-align:center;padding:40px;color:var(--text-muted)">
+    <div style="font-size:40px;margin-bottom:12px">📅</div>
+    <p>Select a month and click "Check Defaulters"</p>
+  </div>
+</div>
+
+<script>
+(function() {
+  var now = new Date();
+  var el  = document.getElementById('def-month');
+  if (el) el.value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+})();
+
+function loadDefaulters() {
+  var month = document.getElementById('def-month').value;
+  if (!month) { showToast('Please select a month','error'); return; }
+  document.getElementById('def-display').innerHTML = loadingHtml('Checking defaulters…');
+
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (!r || !r.success) { showToast('Error: '+(r&&r.error||'Unknown'),'error'); return; }
+      defRender(r.data || [], month);
+    })
+    .withFailureHandler(function(e) {
+      document.getElementById('def-display').innerHTML =
+        '<div style="color:var(--c-rejected-fg);padding:20px">Error: ' + e + '</div>';
+    })
+    .doPost_internal('tenants.getDefaulters', { month: month });
+}
+
+function defRender(defaulters, month) {
+  var el       = document.getElementById('def-display');
+  var occupied = defaulters.length;
+
+  var mTotal = 0, wTotal = 0;
+  for (var i = 0; i < defaulters.length; i++) {
+    var mt = defaulters[i].missing_types || [];
+    for (var j = 0; j < mt.length; j++) {
+      if (mt[j] === 'Maintenance')      mTotal++;
+      if (mt[j] === 'Waste Management') wTotal++;
+    }
+  }
+
+  var stats =
+    '<div class="stats-grid" style="margin-bottom:20px">' +
+    '<div class="stat-card red"><div class="stat-label">Defaulters</div>' +
+      '<div class="stat-value">' + defaulters.length + '</div>' +
+      '<div class="stat-sub">for ' + formatMonth(month) + '</div></div>' +
+    '<div class="stat-card gold"><div class="stat-label">Missing Maintenance</div>' +
+      '<div class="stat-value">' + mTotal + '</div>' +
+      '<div class="stat-sub">₹' + (mTotal * 2000).toLocaleString('en-IN') + ' outstanding</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Missing Waste Mgmt</div>' +
+      '<div class="stat-value">' + wTotal + '</div>' +
+      '<div class="stat-sub">₹' + (wTotal * 170).toLocaleString('en-IN') + ' outstanding</div></div>' +
+    '</div>';
+
+  if (!defaulters.length) {
+    el.innerHTML = stats + emptyHtml('🎉','No defaulters for ' + formatMonth(month) + '!');
+    return;
+  }
+
+  var cols = [
+    { key:'unit_id', label:'Unit', render:function(v){ return '<strong>'+v+'</strong>'; } },
+    { key:'tenant',  label:'Tenant', render:function(v){ return v ? v.name + '<br><span style="font-size:11px;color:var(--text-muted)">' + (v.phone||'') + '</span>' : '—'; } },
+    { key:'missing_types', label:'Missing Payments', render:function(v){
+      var h = '';
+      for (var i = 0; i < (v||[]).length; i++) h += pillStatus(v[i]) + ' ';
+      return h;
+    }},
+    { key:'missing_types', label:'Est. Outstanding', render:function(v){
+      var total = 0;
+      var hasLpg = false;
+      for (var i = 0; i < (v||[]).length; i++) {
+        if (v[i]==='Maintenance')      total += 2000;
+        if (v[i]==='Waste Management') total += 170;
+        if (v[i]==='LPG')              hasLpg = true;
+      }
+      return '<strong style="color:var(--c-rejected-fg)">' + formatRupees(total) + (hasLpg?' + LPG':'') + '</strong>';
+    }}
+  ];
+
+  el.innerHTML = stats +
+    '<div class="card">' +
+      '<div class="card-header"><span class="card-title">⚠️ Defaulter List — ' + formatMonth(month) + '</span></div>' +
+      '<div class="card-body" style="padding:0">' + buildTable(cols, defaulters, null) + '</div>' +
+    '</div>';
+}
+</script>
+

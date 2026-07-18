@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<!-- Index.html — Main SPA shell: sidebar navigation, page routing, and per-page includes -->
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OXYGEN — Confident Daffodils Owners Association</title>
+  <?!= include('Styles') ?>
+</head>
+<body>
+
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-brand" style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08);">
+      <svg viewBox="0 0 200 200" width="48" height="48" style="flex-shrink:0;" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="oxyRingGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#0E7490"/>
+            <stop offset="55%" stop-color="#06B6D4"/>
+            <stop offset="100%" stop-color="#67E8F9"/>
+          </linearGradient>
+          <radialGradient id="oxyGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#22D3EE" stop-opacity="0.5"/>
+            <stop offset="100%" stop-color="#22D3EE" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <circle cx="95" cy="100" r="92" fill="url(#oxyGlow)"/>
+        <circle cx="82" cy="100" r="62" fill="none" stroke="url(#oxyRingGrad)" stroke-width="26"/>
+        <text x="138" y="158" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="72" fill="#22D3EE">2</text>
+      </svg>
+      <div class="brand-text" style="margin-left:10px;">
+        <span class="brand-name" style="font-size:16px;letter-spacing:.5px;">OXYGEN</span>
+        <span class="brand-sub" style="font-size:9px;letter-spacing:1.2px;opacity:.5;">PROPERTY MANAGEMENT SYSTEM</span>
+      </div>
+    </div>
+
+    <ul class="nav-menu">
+      <li><a href="#" class="nav-link active" onclick="return navigateTo('dashboard',this)">
+        <span class="nav-icon">📊</span><span>Dashboard</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('units',this)">
+        <span class="nav-icon">🏢</span><span>Units</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('payments',this)">
+        <span class="nav-icon">💰</span><span>Fees Received</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('bank',this)">
+        <span class="nav-icon">🏦</span><span>Bank Statement</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('lpg',this)">
+        <span class="nav-icon">🔥</span><span>LPG Readings</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('lpginv',this)">
+        <span class="nav-icon">🛢️</span><span>LPG Inventory</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('reports',this)">
+        <span class="nav-icon">📄</span><span>Reports</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('movein',this)">
+        <span class="nav-icon">📦</span><span>Move-In/Out</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('partyhall',this)">
+        <span class="nav-icon">🎉</span><span>Party Hall Rental</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('vehicle',this)">
+        <span class="nav-icon">🚗</span><span>Vehicle Tracking</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('documents',this)">
+        <span class="nav-icon">📁</span><span>Documents</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('committee',this)">
+        <span class="nav-icon">👥</span><span>EC Committee</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('screenshots',this)">
+        <span class="nav-icon">📸</span><span>Payment Screenshots</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('planner',this)">
+        <span class="nav-icon">📅</span><span>Year Planner</span>
+      </a></li>
+      <li id="nav-admin-settings"><a href="#" class="nav-link" onclick="return navigateTo('settings',this)">
+        <span class="nav-icon">⚙️</span><span>Settings</span>
+      </a></li>
+      <li id="nav-admin-data"><a href="#" class="nav-link" onclick="return navigateTo('data',this)">
+        <span class="nav-icon">📥</span><span>Data Imports</span>
+      </a></li>
+      <li id="nav-admin-corpus"><a href="#" class="nav-link" onclick="return navigateTo('corpus',this)">
+        <span class="nav-icon">🏦</span><span>Corpus Fund</span>
+      </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('help',this)">
+        <span class="nav-icon">❓</span><span>Help</span>
+      </a></li>
+    </ul>
+
+    <div class="sidebar-footer">
+      <div class="org-info">
+        <span class="org-label">Confident Daffodils</span>
+        <span class="org-sub">Owners Association</span>
+      </div>
+    </div>
+  </nav>
+
+  <header class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+    <span class="topbar-title" id="topbar-title">OXYGEN</span>
+  </header>
+
+  <main class="main-content" id="main-content">
+
+    <div id="page-dashboard" class="page-section">
+      <?!= include('Dashboard') ?>
+    </div>
+    <div id="page-units" class="page-section" style="display:none;">
+      <?!= include('Units') ?>
+    </div>
+    <div id="page-payments" class="page-section" style="display:none;">
+      <?!= include('Payments') ?>
+    </div>
+    <div id="page-bank" class="page-section" style="display:none;">
+      <?!= include('BankStatement') ?>
+    </div>
+    <div id="page-lpg" class="page-section" style="display:none;">
+      <?!= include('LPGReadings') ?>
+    </div>
+    <div id="page-lpginv" class="page-section" style="display:none;">
+      <?!= include('LPGInventory') ?>
+    </div>
+    <div id="page-reports" class="page-section" style="display:none;">
+      <?!= include('Reports') ?>
+    </div>
+    <div id="page-movein" class="page-section" style="display:none;">
+      <?!= include('MoveInOut') ?>
+    </div>
+    <div id="page-partyhall" class="page-section" style="display:none;">
+      <?!= include('PartyHall') ?>
+    </div>
+    <div id="page-vehicle" class="page-section" style="display:none;">
+      <?!= include('VehicleTracking') ?>
+    </div>
+    <div id="page-documents" class="page-section" style="display:none;">
+      <?!= include('Documents') ?>
+    </div>
+    <div id="page-committee" class="page-section" style="display:none;">
+      <?!= include('Committee') ?>
+    </div>
+    <div id="page-screenshots" class="page-section" style="display:none;">
+      <?!= include('PaymentScreenshots') ?>
+    </div>
+    <div id="page-planner" class="page-section" style="display:none;">
+      <?!= include('YearPlanner') ?>
+    </div>
+    <div id="page-settings" class="page-section" style="display:none;">
+      <?!= include('Settings') ?>
+    </div>
+    <div id="page-data" class="page-section" style="display:none;">
+      <?!= include('DataManagement') ?>
+    </div>
+    <div id="page-corpus" class="page-section" style="display:none;">
+      <?!= include('CorpusFund') ?>
+    </div>
+    <div id="page-help" class="page-section" style="display:none;">
+      <?!= include('Help') ?>
+    </div>
+
+  </main>
+
+  <div id="toast-container"></div>
+  <div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+    <div class="modal-box" id="modal-box"></div>
+  </div>
+
+  <?!= include('Scripts') ?>
+  <?!= include('UnitProfile') ?>
+
+  <script>
+    // Injected by the server (doGet) — the signed-in viewer's role
+    var APP_ROLE  = '<?= appRole ?>';
+    var APP_EMAIL = '<?= appEmail ?>';
+
+</script>
+<script>
+    var PAGE_TITLES = {
+      dashboard: 'Dashboard',
+      units:     'Units',
+      payments:  'Fees Received by the Association',
+      bank:      'Bank Statement',
+      lpg:       'LPG Meter Readings',
+      lpginv:    'LPG Inventory & Business P&L',
+      reports:   'Reports',
+      movein:    'Move-In / Move-Out',
+      partyhall: 'Party Hall Rental',
+      vehicle:   'Vehicle Tracking',
+      documents: 'Documents',
+      committee: 'Office Bearers & EC Members',
+      screenshots: 'Payment Screenshots',
+      planner: 'Year Planner',
+      corpus: 'Corpus Fund',
+      help: 'Help',
+      data:      'Data Imports'
+    };
+
+    var pageLoaded  = { dashboard: true };
+    var currentPage = 'dashboard';
+
+    var pageInitFns = {
+      units:     function() { if (typeof loadUnits      === 'function') loadUnits(); },
+      payments:  function() { if (typeof loadPayments   === 'function') loadPayments(); },
+      bank:      function() { if (typeof bankPageInit   === 'function') bankPageInit(); },
+      lpg:       function() { if (typeof lpgPageInit    === 'function') lpgPageInit(); },
+      lpginv:    function() { if (typeof invPageInit    === 'function') invPageInit(); },
+      reports:   function() { if (typeof repPageInit    === 'function') repPageInit(); },
+      movein:    function() { if (typeof moveinPageInit    === 'function') moveinPageInit(); },
+      partyhall: function() { if (typeof partyhallPageInit === 'function') partyhallPageInit(); },
+      vehicle:   function() { if (typeof vehiclePageInit   === 'function') vehiclePageInit(); },
+      documents: function() { if (typeof documentsPageInit === 'function') documentsPageInit(); },
+      committee: function() { if (typeof committeePageInit === 'function') committeePageInit(); },
+      screenshots: function() { if (typeof screenshotsPageInit === 'function') screenshotsPageInit(); },
+      planner: function() { if (typeof yearPlannerPageInit === 'function') yearPlannerPageInit(); },
+      corpus: function() { if (typeof corpusFundPageInit === 'function') corpusFundPageInit(); },
+      help: function() { if (typeof helpPageInit === 'function') helpPageInit(); },
+      data:      function() { if (typeof dataPageInit === 'function') dataPageInit(); },
+      settings:  function() { if (typeof settingsPageInit === 'function') settingsPageInit(); }
+    };
+
+    // Admin-only pages are both hidden AND blocked for plain users
+    var ADMIN_PAGES = { settings: 1, data: 1, corpus: 1 };
+    function applyRoleUI() {
+      // Signed-in identity chip at the bottom of the sidebar. Safe to
+      // call more than once (e.g. after PIN verification changes the
+      // role) — updates the SAME element in place rather than stacking
+      // up duplicates.
+      var host = document.querySelector('.sidebar') || document.body;
+      var chip = document.getElementById('oxygen-identity-chip');
+      if (!chip) {
+        chip = document.createElement('div');
+        chip.id = 'oxygen-identity-chip';
+        chip.style.cssText = 'padding:8px 20px;font-size:11px;color:rgba(255,255,255,.75);line-height:1.5;word-break:break-all;border-top:1px solid rgba(255,255,255,.08);';
+        var foot = host.querySelector('.sidebar-footer');
+        if (foot) host.insertBefore(chip, foot); else host.appendChild(chip);
+      }
+      // myaccount.google.com, not accounts.google.com/AccountChooser —
+      // that endpoint is old and unstable (it returned a raw Google 400
+      // error). This is Google's current, stable "manage your account"
+      // page, and switching the active account there is reflected the
+      // next time OXYGEN is reloaded.
+      var switchUrl = 'https://myaccount.google.com/';
+      chip.innerHTML = '👤 ' + (APP_EMAIL || 'Unknown account') +
+        '<br><span style="font-weight:800;color:' + (APP_ROLE === 'admin' ? '#4ade80' : '#93c5fd') + '">' +
+        (APP_ROLE === 'admin' ? '🛡️ Administrator' : 'User') + '</span>' +
+        ' &nbsp;<a href="' + switchUrl + '" target="_blank" rel="noopener" style="text-decoration:none;font-size:13px;" title="Switch Account: Opens Google account settings in a new tab — pick your account there, then come back and reload this page">🔁</a>';
+
+      var a = document.getElementById('nav-admin-settings');
+      var b = document.getElementById('nav-admin-data');
+      var c = document.getElementById('nav-admin-corpus');
+      if (a) a.style.display = APP_ROLE === 'admin' ? '' : 'none';
+      if (b) b.style.display = APP_ROLE === 'admin' ? '' : 'none';
+      if (c) c.style.display = APP_ROLE === 'admin' ? '' : 'none';
+    }
+    document.addEventListener('DOMContentLoaded', applyRoleUI);
+    document.addEventListener('DOMContentLoaded', oxygenPinGate);
+
+    // Shown ONLY when Google couldn't reveal this visitor's email AND no
+    // PIN was already verified this session (the server already checked
+    // the 6-hour cache before rendering — reaching here means neither
+    // path resolved a real identity). A real Google email (the owner, or
+    // any Workspace-domain account where Google DOES disclose it) never
+    // sees this at all — APP_EMAIL will already contain '@' for them.
+    function oxygenPinGate() {
+      if (String(APP_EMAIL || '').indexOf('@') > -1) return; // already a real, known identity
+
+      var overlay = document.createElement('div');
+      overlay.id = 'oxygen-pin-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(4,16,28,.92);display:flex;align-items:center;justify-content:center;padding:20px;';
+      overlay.innerHTML =
+        '<div style="background:#0E2D4A;border-radius:14px;padding:28px 26px;max-width:380px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);">' +
+          '<div style="font-size:17px;font-weight:800;margin-bottom:8px;color:#ffffff;">🔑 One more step</div>' +
+          '<div style="font-size:12.5px;color:#c8d9e6;line-height:1.6;margin-bottom:16px;">' +
+            'Google can\'t confirm exactly who you are on this device (a known limitation for personal Google accounts). ' +
+            'If your Administrator gave you a PIN, enter it below to unlock your correct access.</div>' +
+          '<input id="oxygen-pin-input" type="password" inputmode="numeric" placeholder="Enter your PIN" ' +
+            'style="width:100%;padding:11px 14px;font-size:15px;border-radius:8px;border:1px solid #cbd5e1;background:#ffffff;color:#0d1b2a;margin-bottom:10px;" ' +
+            'onkeydown="if(event.key===\'Enter\')oxygenPinSubmit();">' +
+          '<div id="oxygen-pin-error" style="color:#f87171;font-size:12px;min-height:16px;margin-bottom:10px;"></div>' +
+          '<button class="btn btn-accent" style="width:100%;margin-bottom:10px;" onclick="oxygenPinSubmit()">Unlock</button>' +
+          '<div style="text-align:center;"><a href="#" onclick="oxygenPinSkip();return false;" style="font-size:11.5px;color:#9fb8cc;text-decoration:underline;">Continue without a PIN (limited access)</a></div>' +
+        '</div>';
+      document.body.appendChild(overlay);
+      setTimeout(function() { var i = document.getElementById('oxygen-pin-input'); if (i) i.focus(); }, 50);
+    }
+
+    function oxygenPinSkip() {
+      var o = document.getElementById('oxygen-pin-overlay');
+      if (o) o.parentNode.removeChild(o);
+    }
+
+    function oxygenPinSubmit() {
+      var input = document.getElementById('oxygen-pin-input');
+      var errEl = document.getElementById('oxygen-pin-error');
+      var pin = input ? input.value.trim() : '';
+      if (errEl) errEl.textContent = '';
+      if (!pin) { if (errEl) errEl.textContent = 'Enter your PIN.'; return; }
+      google.script.run.withSuccessHandler(function(r) {
+        if (!r || !r.success) { if (errEl) errEl.textContent = (r && r.error) || 'Failed — try again.'; return; }
+        APP_EMAIL = r.data.email;
+        APP_ROLE  = r.data.role;
+        oxygenPinSkip();
+        applyRoleUI();
+        showToast('Welcome, ' + APP_EMAIL, 'success');
+      }).withFailureHandler(function(e) {
+        if (errEl) errEl.textContent = 'PIN not recognized.';
+      }).doPost_internal('auth.verifyPin', { pin: pin });
+    }
+
+    function navigateTo(page, linkEl) {
+      if (ADMIN_PAGES[page] && APP_ROLE !== 'admin') {
+        showToast('Administrator access required', 'error');
+        return false;
+      }
+      // Hide current
+      var cur = document.getElementById('page-' + currentPage);
+      if (cur) cur.style.display = 'none';
+
+      // Also hide unitprofile if coming from there
+      var up = document.getElementById('page-unitprofile');
+      if (up) up.style.display = 'none';
+
+      // Show new page
+      var next = document.getElementById('page-' + page);
+      if (next) { next.style.display = 'block'; next.style.animation = 'fadeInUp 0.25s ease'; }
+
+      // Update active nav link
+      var links = document.querySelectorAll('.nav-link');
+      for (var i = 0; i < links.length; i++) links[i].classList.remove('active');
+      if (linkEl) linkEl.classList.add('active');
+
+      // Update topbar title
+      var titleEl = document.getElementById('topbar-title');
+      if (titleEl) titleEl.textContent = PAGE_TITLES[page] || page;
+
+      // Init page on first visit
+      if (!pageLoaded[page]) {
+        pageLoaded[page] = true;
+        if (pageInitFns[page]) pageInitFns[page]();
+      }
+
+      currentPage = page;
+      document.getElementById('sidebar').classList.remove('open');
+      document.getElementById('main-content').scrollTop = 0;
+      return false;
+    }
+
+    // Theme toggle
+    function toggleTheme(checkbox) {
+      var isDark = checkbox.checked;
+      document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+      document.getElementById('theme-icon-label').textContent = isDark ? '🌙' : '☀️';
+      document.getElementById('theme-text-label').textContent = isDark ? 'Dark mode' : 'Light mode';
+      try { localStorage.setItem('cd-theme', isDark ? 'dark' : 'light'); } catch(e) {}
+    }
+
+    // Restore saved theme — DARK is the default when nothing's been
+    // chosen yet; the toggle itself now lives in Settings (Admin-only),
+    // not in the sidebar, so regular Users always see the default
+    // unless an Admin has changed their own browser's preference. The
+    // toggle's own elements still exist in the DOM (just inside the
+    // normally-hidden Settings page), so they're synced the same way
+    // regardless of which page is currently showing.
+    (function() {
+      var saved = 'dark';
+      try { saved = localStorage.getItem('cd-theme') || 'dark'; } catch(e) {}
+      document.documentElement.setAttribute('data-theme', saved);
+      var cb = document.getElementById('theme-checkbox');
+      var icon = document.getElementById('theme-icon-label');
+      var text = document.getElementById('theme-text-label');
+      if (cb) cb.checked = (saved === 'dark');
+      if (icon) icon.textContent = saved === 'dark' ? '🌙' : '☀️';
+      if (text) text.textContent = saved === 'dark' ? 'Dark mode' : 'Light mode';
+    })();
+
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof refreshDashboard === 'function') refreshDashboard();
+    });
+  </script>
+
+</body>
+</html>

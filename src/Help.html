@@ -1,0 +1,103 @@
+<!-- Help.html — About, Release Notes, Instructions for Use, User Manual.
+     Content is fetched from HelpService (one source, shared with the
+     PDF generator) and rendered from a simple block schema. -->
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">❓ Help</h1>
+    <p class="page-subtitle">About OXYGEN, release notes, instructions for use, and the full user manual</p>
+    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+      <button class="btn btn-sm" id="hlp-tab-about" onclick="hlpSwitchTab('about')">ℹ️ About</button>
+      <button class="btn btn-sm btn-outline" id="hlp-tab-release_notes" onclick="hlpSwitchTab('release_notes')">📋 Release Notes</button>
+      <button class="btn btn-sm btn-outline" id="hlp-tab-instructions" onclick="hlpSwitchTab('instructions')">✅ Instructions for Use</button>
+      <button class="btn btn-sm btn-outline" id="hlp-tab-manual" onclick="hlpSwitchTab('manual')">📖 User Manual</button>
+    </div>
+  </div>
+  <button class="btn btn-accent btn-sm" id="hlp-pdf-btn" onclick="hlpDownloadPdf()">📄 Download PDF</button>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div id="hlp-status" style="margin-bottom:10px;"></div>
+    <div id="hlp-body" style="max-width:760px;line-height:1.65;"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<script>
+var hlpTab = 'about';
+var hlpCache = {};
+
+function hlpE(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function hlpShowStatus(msg, type) {
+  var el = document.getElementById('hlp-status');
+  if (!el) return;
+  if (!msg) { el.innerHTML = ''; return; }
+  var bg = type === 'success' ? 'var(--c-verified-bg)' : type === 'error' ? 'var(--c-rejected-bg)' : 'var(--bg-surface2)';
+  var fg = type === 'success' ? 'var(--c-verified-fg)' : type === 'error' ? 'var(--c-rejected-fg)' : 'var(--text-secondary)';
+  el.innerHTML = '<div style="background:' + bg + ';color:' + fg + ';padding:8px 12px;border-radius:6px;font-size:12.5px;">' + msg + '</div>';
+}
+
+function hlpSwitchTab(tab) {
+  hlpTab = tab;
+  ['about', 'release_notes', 'instructions', 'manual'].forEach(function(k) {
+    var el = document.getElementById('hlp-tab-' + k);
+    if (el) el.className = 'btn btn-sm' + (k === tab ? '' : ' btn-outline');
+  });
+  hlpRender();
+}
+
+function hlpLoad(docKey) {
+  var body = document.getElementById('hlp-body');
+  if (hlpCache[docKey]) { hlpRenderBlocks(hlpCache[docKey]); return; }
+  if (body) body.innerHTML = loadingHtml('Loading…');
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:14px;">Error: ' + hlpE(r ? r.error : 'failed') + '</div>'; return; }
+    hlpCache[docKey] = r.data;
+    hlpRenderBlocks(r.data);
+  }).withFailureHandler(function(e) {
+    if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:14px;">Error: ' + hlpE(e) + '</div>';
+  }).doPost_internal('help.getContent', { doc_key: docKey });
+}
+
+function hlpRender() { hlpLoad(hlpTab); }
+
+function hlpRenderBlocks(doc) {
+  var body = document.getElementById('hlp-body');
+  if (!body) return;
+  var h = '';
+  var numbering = 0;
+  doc.blocks.forEach(function(blk) {
+    if (blk.t !== 'n') numbering = 0;
+    if (blk.t === 'h1') h += '<div style="font-family:var(--font-display);font-size:22px;font-weight:800;margin:4px 0 6px;">' + hlpE(blk.x) + '</div>';
+    else if (blk.t === 'h2') h += '<div style="font-family:var(--font-display);font-size:16px;font-weight:700;margin:20px 0 8px;padding-bottom:5px;border-bottom:2px solid var(--accent);">' + hlpE(blk.x) + '</div>';
+    else if (blk.t === 'h3') h += '<div style="font-weight:700;font-size:13.5px;margin:12px 0 4px;">' + hlpE(blk.x) + '</div>';
+    else if (blk.t === 'p') h += '<p style="font-size:13.5px;color:var(--text-secondary);margin:0 0 10px;">' + hlpE(blk.x) + '</p>';
+    else if (blk.t === 'b') h += '<div style="font-size:13.5px;color:var(--text-secondary);margin:0 0 6px;padding-left:18px;position:relative;"><span style="position:absolute;left:0;">•</span>' + hlpE(blk.x) + '</div>';
+    else if (blk.t === 'n') { numbering++; h += '<div style="font-size:13.5px;color:var(--text-secondary);margin:0 0 6px;padding-left:22px;position:relative;"><span style="position:absolute;left:0;font-weight:700;">' + numbering + '.</span>' + hlpE(blk.x) + '</div>'; }
+    else if (blk.t === 'hr') h += '<hr style="border:none;border-top:1px solid var(--border,rgba(128,128,128,.25));margin:14px 0;">';
+  });
+  body.innerHTML = h;
+}
+
+function hlpDownloadPdf() {
+  var btn = document.getElementById('hlp-pdf-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Generating…'; }
+  hlpShowStatus('⏳ Building the PDF…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    if (btn) { btn.disabled = false; btn.textContent = '📄 Download PDF'; }
+    if (!r || !r.success) { hlpShowStatus('❌ ' + (r ? r.error : 'Failed'), 'error'); return; }
+    rpDownloadBase64Pdf(r.data.base64, r.data.filename);
+    hlpShowStatus('✓ Downloaded ' + r.data.filename, 'success');
+  }).withFailureHandler(function(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '📄 Download PDF'; }
+    hlpShowStatus('❌ Error: ' + e, 'error');
+  }).doPost_internal('help.generatePdf', { doc_key: hlpTab });
+}
+
+function helpPageInit() { hlpSwitchTab('about'); }
+</script>

@@ -1,0 +1,53 @@
+<!-- PartyHall.html — response viewer for the Party Hall Rental form.
+     All loading/rendering logic is shared, defined in MoveInOut.html. -->
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">🎉 Party Hall Rental</h1>
+    <p class="page-subtitle">Responses from the Party Hall Rental Google Form — booking requests, live from the form's response sheet</p>
+  </div>
+  <button class="btn btn-outline btn-sm" onclick="window.open(formsConfig.partyhall.formUrl, '_blank')">🔗 Open the Form</button>
+  <button class="btn btn-outline btn-sm" onclick="formsLoad('partyhall', true)">🔄 Refresh</button>
+</div>
+
+<div style="display:flex;align-items:center;gap:10px;background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 16px;margin-bottom:16px;flex-wrap:wrap;">
+  <span style="font-size:13px;font-weight:600;flex:1;min-width:200px;">📄 Terms &amp; Conditions for Renting Party Hall (25 Dec 2023)</span>
+  <button class="btn btn-outline btn-sm" onclick="phViewTerms()">👁️ View</button>
+  <button class="btn btn-outline btn-sm" onclick="window.open('https://drive.google.com/uc?export=download&id=' + PH_TERMS_FILE_ID, '_blank')">⬇️ Download</button>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+      <input id="forms-partyhall-search" type="text" placeholder="🔍 Search responses…" oninput="formsFilter('partyhall')" style="flex:1;min-width:220px;padding:8px 12px;font-size:13px;">
+      <span id="forms-partyhall-count" style="font-size:12px;color:var(--text-muted);white-space:nowrap;"></span>
+    </div>
+    <div id="forms-partyhall-body"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<script>
+var PH_TERMS_FILE_ID = '1xJ-dVsZ9ZfNkRPhVkcwR0nHe8Mga2Cr8';
+
+// Show the Terms & Conditions right inside the app: Google Drive's
+// /preview endpoint is embeddable in an iframe (the plain /view page is
+// not), so the document opens in a modal instead of a new Drive tab.
+function phViewTerms() {
+  openModal(
+    '<div class="modal-header"><span class="modal-title">📄 Terms &amp; Conditions for Renting Party Hall (25 Dec 2023)</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body" style="padding:0;">' +
+      '<iframe src="https://drive.google.com/file/d/' + PH_TERMS_FILE_ID + '/preview" ' +
+        'style="width:100%;height:72vh;border:none;display:block;background:var(--bg-surface2);" allow="autoplay"></iframe>' +
+      '<div style="display:flex;gap:16px;justify-content:flex-end;padding:8px 16px;font-size:11.5px;">' +
+        '<a href="https://drive.google.com/file/d/' + PH_TERMS_FILE_ID + '/view" target="_blank" rel="noopener" style="color:var(--accent);">Open in Google Drive ↗</a>' +
+        '<a href="https://drive.google.com/uc?export=download&id=' + PH_TERMS_FILE_ID + '" style="color:var(--accent);">⬇️ Download</a>' +
+      '</div>' +
+    '</div>');
+  // Documents want room — widen just this modal (openModal resets it).
+  var box = document.getElementById('modal-box');
+  box.style.maxWidth = '900px';
+}
+
+function partyhallPageInit() { formsLoad('partyhall'); }
+</script>

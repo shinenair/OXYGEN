@@ -1,0 +1,432 @@
+<!-- LPGInventory.html — LPG Cylinder Stock (Inward/Outward), Inventory vs Bank Reconciliation, and Monthly Profit & Loss -->
+<div class="page-head">
+  <div>
+    <h1 class="page-title">🛢️ LPG Inventory & Business P&L</h1>
+    <p class="page-subtitle">Cylinder stock, reorder status, and whether the LPG business is running at a profit or loss</p>
+  </div>
+</div>
+
+<style>
+  .inv-section { margin-bottom: 22px; }
+  .inv-tabs { display:flex;gap:6px;margin-bottom:12px;border-bottom:2px solid var(--border); }
+  .inv-tab { padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px; }
+  .inv-tab.active { color:var(--accent);border-bottom-color:var(--accent); }
+  #inv-table table, #inv-out-table table, #inv-comp-table table { border-collapse:collapse;width:100%; }
+  #inv-table th, #inv-table td, #inv-out-table th, #inv-out-table td, #inv-comp-table th, #inv-comp-table td {
+    border:1px solid var(--border-strong, rgba(128,128,128,.35)); padding:7px 9px;font-size:12.5px;
+  }
+  #inv-table th, #inv-out-table th, #inv-comp-table th { background:var(--bg-surface2);font-weight:800;font-size:11.5px; }
+  #inv-table tbody tr:hover td, #inv-out-table tbody tr:hover td, #inv-comp-table tbody tr:hover td { background:rgba(0,200,150,.06); }
+  .inv-row-active td { background:rgba(0,200,150,.14) !important; }
+  .inv-row-active td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  .inv-status-good { color:var(--c-verified-fg);font-weight:800; }
+  .inv-status-bad  { color:var(--c-rejected-fg);font-weight:800; }
+  .inv-verify-ok  { color:var(--c-verified-fg);font-weight:700; }
+  .inv-verify-bad { color:var(--c-rejected-fg);font-weight:700; }
+  .inv-filters { display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px; }
+  .inv-filters select { padding:7px 10px;font-size:13px; }
+  /* Hover-only pencil/delete — identical interaction to LPG Readings and
+     the Bank Statement page: invisible until the row is hovered. */
+  .edit-pencil { cursor:pointer;opacity:0;font-size:12px;transition:opacity .12s;filter:grayscale(.3); }
+  tr:hover .edit-pencil { opacity:.55; }
+  .edit-pencil:hover { opacity:1 !important; }
+</style>
+
+<div id="inv-stock-stats" class="stats-grid inv-section"><div class="loading"><div class="spinner"></div></div></div>
+
+<div class="inv-tabs">
+  <div class="inv-tab active" id="inv-tab-inward" onclick="invSetTab('inward')">📥 Stock Inward</div>
+  <div class="inv-tab" id="inv-tab-outward" onclick="invSetTab('outward')">📤 Stock Outward</div>
+  <div class="inv-tab" id="inv-tab-compare" onclick="invSetTab('compare')">🔍 Inventory vs Bank</div>
+  <div class="inv-tab" id="inv-tab-pl" onclick="invSetTab('pl')">📊 Monthly Profit &amp; Loss</div>
+</div>
+
+<!-- Stock Inward -->
+<div id="inv-panel-inward" class="inv-section">
+  <div class="inv-filters">
+    <select id="inv-in-fyear" onchange="invLoadInward()"></select>
+    <select id="inv-in-fmonth" onchange="invLoadInward()"><option value="">All Months</option></select>
+  </div>
+  <div class="card" style="margin-bottom:14px;">
+    <div class="card-body">
+      <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:10px;">+ Record a cylinder purchase</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div><label style="font-size:11px;color:var(--text-muted);display:block;">Invoice #</label><input id="inv-in-invoice" style="padding:7px 10px;font-size:13px;width:120px;"></div>
+        <div><label style="font-size:11px;color:var(--text-muted);display:block;">Date</label><input id="inv-in-date" type="date" style="padding:7px 10px;font-size:13px;"></div>
+        <div><label style="font-size:11px;color:var(--text-muted);display:block;">Cost / Cylinder (₹)</label><input id="inv-in-cost" type="number" step="0.01" style="padding:7px 10px;font-size:13px;width:110px;"></div>
+        <div><label style="font-size:11px;color:var(--text-muted);display:block;">Quantity</label><input id="inv-in-qty" type="number" style="padding:7px 10px;font-size:13px;width:90px;"></div>
+        <button class="btn btn-accent" onclick="invAddInward()">+ Add</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin:0;"><div class="card-body" style="padding:0;"><div class="table-wrap" style="max-height:50vh;overflow:auto" id="inv-table"></div></div></div>
+</div>
+
+<!-- Stock Outward -->
+<div id="inv-panel-outward" class="inv-section" style="display:none;">
+  <div class="inv-filters">
+    <select id="inv-out-fyear" onchange="invLoadOutward()"></select>
+    <select id="inv-out-fmonth" onchange="invLoadOutward()"><option value="">All Months</option></select>
+  </div>
+  <div class="card" style="margin-bottom:14px;">
+    <div class="card-body">
+      <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:10px;">+ Record cylinders used</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div><label style="font-size:11px;color:var(--text-muted);display:block;">Date</label><input id="inv-out-date" type="date" style="padding:7px 10px;font-size:13px;"></div>
+        <div><label style="font-size:11px;color:var(--text-muted);display:block;">Quantity Used</label><input id="inv-out-qty" type="number" style="padding:7px 10px;font-size:13px;width:90px;"></div>
+        <div style="flex:1;min-width:180px;"><label style="font-size:11px;color:var(--text-muted);display:block;">Notes</label><input id="inv-out-notes" style="padding:7px 10px;font-size:13px;width:100%;"></div>
+        <button class="btn btn-accent" onclick="invAddOutward()">+ Add</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin:0;"><div class="card-body" style="padding:0;"><div class="table-wrap" style="max-height:50vh;overflow:auto" id="inv-out-table"></div></div></div>
+</div>
+
+<!-- Inventory vs Bank — always live, never stored/edited -->
+<div id="inv-panel-compare" class="inv-section" style="display:none;">
+  <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+    For each month: cylinders purchased and their cost (from Stock Inward invoices, above) compared against actual bank
+    debits tagged with the <strong>LPG Inventory</strong> expense category on the Transaction Ledger. This is calculated
+    fresh every time you open this tab — nothing here is manually entered or stored separately, so it can never drift
+    out of sync with your actual records. A mismatch usually means an invoice hasn't been recorded yet, or a bank
+    transaction hasn't been tagged with the LPG Inventory category.
+  </div>
+  <div class="inv-filters">
+    <select id="inv-cmp-fyear" onchange="invLoadComparison()"></select>
+  </div>
+  <div class="card" style="margin:0;"><div class="card-body" style="padding:0;"><div class="table-wrap" style="max-height:55vh;overflow:auto" id="inv-comp-table"></div></div></div>
+</div>
+
+<!-- Monthly P&L -->
+<div id="inv-panel-pl" class="inv-section" style="display:none;">
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+    <select id="inv-pl-year" onchange="invLoadPL()"></select>
+    <select id="inv-pl-month" onchange="invLoadPL()">
+      <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+      <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+      <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+      <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+    </select>
+  </div>
+  <div id="inv-pl-stats" class="stats-grid"><div class="loading"><div class="spinner"></div></div></div>
+  <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;">
+    A month's reading is only taken in the first week of the <strong>following</strong> month, and residents pay around
+    that same time — so "Collected from Residents" here looks at payments recorded the month <strong>after</strong> the
+    one selected (e.g. January's consumption is matched against February's collections). It draws from the same
+    central Payments ledger used everywhere else in OXYGEN (Fees Received, Dashboard), just offset by one month to
+    correctly match income against the consumption it's paying for.
+    Cylinder cost is estimated as (cylinders used that month) × (running average cost per cylinder across all purchases
+    to date) — a simple, transparent costing method, not FIFO/LIFO batch tracking.
+  </div>
+</div>
+
+<script>
+var invTab = 'inward';
+var invInwardCache = [], invOutwardCache = [];
+var invActiveRow = '';
+
+// Every year/month filter on this page self-extends — 2027, 2028, 2029...
+// simply appear once data exists for them, no code changes ever needed.
+function invPopulateYearSelect(el, includeAllOption) {
+  if (!el || el.options.length) return;
+  var now = new Date(), years = [];
+  for (var y = now.getFullYear() + 1; y >= 2023; y--) years.push(y);
+  var h = includeAllOption ? '<option value="">All Years</option>' : '';
+  h += years.map(function(yy){ return '<option value="'+yy+'">'+yy+'</option>'; }).join('');
+  el.innerHTML = h;
+  if (!includeAllOption) el.value = String(now.getFullYear());
+}
+function invPopulateMonthSelect(el) {
+  if (!el || el.options.length > 1) return;
+  var mn = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var h = '<option value="">All Months</option>';
+  for (var m = 0; m < 12; m++) h += '<option value="'+(m+1)+'">'+mn[m]+'</option>';
+  el.innerHTML = h;
+}
+
+function invPageInit() {
+  invPopulateYearSelect(document.getElementById('inv-in-fyear'), true);
+  invPopulateMonthSelect(document.getElementById('inv-in-fmonth'));
+  invPopulateYearSelect(document.getElementById('inv-out-fyear'), true);
+  invPopulateMonthSelect(document.getElementById('inv-out-fmonth'));
+  invPopulateYearSelect(document.getElementById('inv-cmp-fyear'), true);
+
+  invLoadStockSummary();
+  invLoadInward();
+  invLoadOutward();
+  invLoadComparison();
+
+  var now = new Date();
+  var ySel = document.getElementById('inv-pl-year');
+  invPopulateYearSelect(ySel, false);
+  if (document.getElementById('inv-pl-month').value === '') document.getElementById('inv-pl-month').value = String(now.getMonth()+1);
+  invLoadPL();
+}
+
+function invSetTab(tab) {
+  invTab = tab;
+  ['inward','outward','compare','pl'].forEach(function(t) {
+    document.getElementById('inv-tab-'+t).className = 'inv-tab' + (t===tab?' active':'');
+    document.getElementById('inv-panel-'+t).style.display = (t===tab?'block':'none');
+  });
+}
+
+function invSelectRow(id) {
+  var prev = document.getElementById('inv-row-' + invActiveRow);
+  if (prev) prev.className = prev.className.replace('inv-row-active', '').trim();
+  invActiveRow = id;
+  var cur = document.getElementById('inv-row-' + id);
+  if (cur && cur.className.indexOf('inv-row-active') === -1) cur.className = (cur.className + ' inv-row-active').trim();
+}
+
+function invLoadStockSummary() {
+  google.script.run.withSuccessHandler(function(r) {
+    var s = (r && r.success && r.data) ? r.data : null;
+    var el = document.getElementById('inv-stock-stats');
+    if (!el || !s) return;
+    el.innerHTML =
+      '<div class="stat-card info"><div class="stat-label">Total Purchased</div><div class="stat-value">' + s.totalInward + '</div><div class="stat-sub">cylinders (all time)</div></div>' +
+      '<div class="stat-card info"><div class="stat-label">Total Used</div><div class="stat-value">' + s.totalOutward + '</div><div class="stat-sub">cylinders (all time)</div></div>' +
+      '<div class="stat-card ' + (s.statusOk?'green':'red') + '"><div class="stat-label">Net Stock</div><div class="stat-value">' + s.netStock + '</div><div class="stat-sub">cylinders remaining</div></div>' +
+      '<div class="stat-card ' + (s.statusOk?'green':'red') + '"><div class="stat-label">Status</div><div class="stat-value" style="font-size:18px">' + (s.statusOk ? '✅ Good' : '⚠️ Order') + '</div><div class="stat-sub">min. threshold: ' + s.minQuantity + '</div></div>' +
+      '<div class="stat-card gold"><div class="stat-label">Avg Cost / Cylinder</div><div class="stat-value" style="font-size:19px">₹' + s.avgCostPerCylinder.toLocaleString('en-IN') + '</div><div class="stat-sub">running average</div></div>';
+  }).doPost_internal('lpgInv.getStockSummary', {});
+}
+
+// ── Stock Inward ─────────────────────────────────────────────────
+function invLoadInward() {
+  var fy = (document.getElementById('inv-in-fyear')||{}).value;
+  var fm = (document.getElementById('inv-in-fmonth')||{}).value;
+  google.script.run.withSuccessHandler(function(r) {
+    var all = (r && r.success && r.data) ? r.data : [];
+    invInwardCache = all.filter(function(row) {
+      if (!row.date) return !fy && !fm; // undated rows only show under "All"
+      var parts = row.date.split('-');
+      if (fy && parts[0] !== fy) return false;
+      if (fm && String(parseInt(parts[1],10)) !== fm) return false;
+      return true;
+    });
+    var h = '<table><thead><tr><th>#</th><th>Invoice #</th><th>Date</th><th style="text-align:right">Cost/Cylinder</th><th style="text-align:right">Qty</th><th style="text-align:right">Total</th><th>Action</th></tr></thead><tbody>';
+    for (var i=0;i<invInwardCache.length;i++){
+      var r2 = invInwardCache[i];
+      h += '<tr id="inv-row-'+r2.inward_id+'" class="'+(invActiveRow===r2.inward_id?'inv-row-active':'')+'" onclick="invSelectRow(\'' + r2.inward_id + '\')">'+
+        '<td>'+(i+1)+'</td>'+
+        '<td>'+invE(r2.invoice_number)+'</td>'+
+        '<td>'+(r2.date ? formatDate(r2.date) : '<span style="color:#f59e0b;font-weight:700">⚠️ no date</span>')+'</td>'+
+        '<td style="text-align:right">₹'+r2.cost_per_cylinder.toLocaleString('en-IN')+'</td>'+
+        '<td style="text-align:right">'+r2.quantity+'</td>'+
+        '<td style="text-align:right;font-weight:700">₹'+r2.total_amount.toLocaleString('en-IN')+'</td>'+
+        '<td><span class="edit-pencil" title="Edit" onclick="event.stopPropagation();invOpenEditInward(\'' + r2.inward_id + '\')">✏️</span> '+
+        '<span class="edit-pencil" title="Delete" onclick="event.stopPropagation();invDeleteInward(\'' + r2.inward_id + '\')">🗑️</span></td></tr>';
+    }
+    document.getElementById('inv-table').innerHTML = h + '</tbody></table>';
+  }).doPost_internal('lpgInv.getInward', {});
+}
+
+function invAddInward() {
+  var payload = {
+    invoice_number: (document.getElementById('inv-in-invoice')||{}).value || '',
+    date: (document.getElementById('inv-in-date')||{}).value || '',
+    cost_per_cylinder: (document.getElementById('inv-in-cost')||{}).value || '',
+    quantity: (document.getElementById('inv-in-qty')||{}).value || '',
+    recorded_by: 'Manager'
+  };
+  if (!payload.date || !payload.cost_per_cylinder || !payload.quantity) { showToast('Fill date, cost, and quantity', 'error'); return; }
+  doPostWithHistoryConfirm('lpgInv.addInward', payload,
+    function(r) {
+      if (r && r.success) {
+        showToast('Purchase recorded', 'success');
+        document.getElementById('inv-in-invoice').value=''; document.getElementById('inv-in-date').value='';
+        document.getElementById('inv-in-cost').value=''; document.getElementById('inv-in-qty').value='';
+        invLoadInward(); invLoadStockSummary(); invLoadComparison();
+      } else showToast((r&&r.error)||'Failed','error');
+    },
+    function(e){ showToast('Error: '+e,'error'); }
+  );
+}
+
+function invOpenEditInward(id) {
+  invSelectRow(id);
+  var r = null;
+  for (var i=0;i<invInwardCache.length;i++) if (invInwardCache[i].inward_id===id) r = invInwardCache[i];
+  if (!r) return;
+  openModal(
+    '<div class="modal-header"><span class="modal-title">📥 Edit Stock Inward</span>'+
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="form-group"><label>Invoice #</label><input id="inv-e-invoice" value="'+invE(r.invoice_number)+'"></div>'+
+      '<div class="form-group"><label>Date</label><input id="inv-e-date" type="date" value="'+r.date+'"></div>'+
+      '<div class="form-group"><label>Cost / Cylinder (₹)</label><input id="inv-e-cost" type="number" step="0.01" value="'+r.cost_per_cylinder+'"></div>'+
+      '<div class="form-group"><label>Quantity</label><input id="inv-e-qty" type="number" value="'+r.quantity+'"></div>'+
+      '<div class="form-actions">'+
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>'+
+        '<button class="btn btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg)" onclick="invDeleteInward(\'' + id + '\')">🗑 Delete</button>'+
+        '<button class="btn btn-accent" onclick="invSaveEditInward(\'' + id + '\')">💾 Save</button>'+
+      '</div></div>'
+  );
+}
+
+function invSaveEditInward(id) {
+  var payload = {
+    invoice_number: (document.getElementById('inv-e-invoice')||{}).value || '',
+    date: (document.getElementById('inv-e-date')||{}).value || '',
+    cost_per_cylinder: (document.getElementById('inv-e-cost')||{}).value || '',
+    quantity: (document.getElementById('inv-e-qty')||{}).value || '',
+    recorded_by: 'Manager'
+  };
+  if (!payload.date || !payload.cost_per_cylinder || !payload.quantity) { showToast('Fill all fields', 'error'); return; }
+  google.script.run.withSuccessHandler(function() {
+    google.script.run.withSuccessHandler(function(r2) {
+      if (r2 && r2.success) { showToast('Saved', 'success'); closeModalForce(); invLoadInward(); invLoadStockSummary(); invLoadComparison(); }
+      else showToast((r2&&r2.error)||'Failed','error');
+    }).doPost_internal('lpgInv.addInward', payload);
+  }).doPost_internal('lpgInv.deleteInward', { inward_id: id });
+}
+
+function invDeleteInward(id) {
+  if (!confirm('Delete this purchase record?')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Deleted','success'); closeModalForce(); invLoadInward(); invLoadStockSummary(); invLoadComparison(); }
+    else showToast((r&&r.error)||'Failed','error');
+  }).doPost_internal('lpgInv.deleteInward', { inward_id: id });
+}
+
+// ── Stock Outward ────────────────────────────────────────────────
+function invLoadOutward() {
+  var fy = (document.getElementById('inv-out-fyear')||{}).value;
+  var fm = (document.getElementById('inv-out-fmonth')||{}).value;
+  google.script.run.withSuccessHandler(function(r) {
+    var all = (r && r.success && r.data) ? r.data : [];
+    invOutwardCache = all.filter(function(row) {
+      if (!row.date) return !fy && !fm;
+      var parts = row.date.split('-');
+      if (fy && parts[0] !== fy) return false;
+      if (fm && String(parseInt(parts[1],10)) !== fm) return false;
+      return true;
+    });
+    var h = '<table><thead><tr><th>#</th><th>Date</th><th style="text-align:right">Qty Used</th><th>Notes</th><th>Action</th></tr></thead><tbody>';
+    for (var i=0;i<invOutwardCache.length;i++){
+      var r2 = invOutwardCache[i];
+      h += '<tr id="inv-row-'+r2.outward_id+'" class="'+(invActiveRow===r2.outward_id?'inv-row-active':'')+'" onclick="invSelectRow(\'' + r2.outward_id + '\')">'+
+        '<td>'+(i+1)+'</td><td>'+(r2.date ? formatDate(r2.date) : '<span style="color:#f59e0b;font-weight:700">⚠️ no date</span>')+'</td>'+
+        '<td style="text-align:right">'+r2.quantity+'</td><td>'+invE(r2.notes)+'</td>'+
+        '<td><span class="edit-pencil" title="Edit" onclick="event.stopPropagation();invOpenEditOutward(\'' + r2.outward_id + '\')">✏️</span> '+
+        '<span class="edit-pencil" title="Delete" onclick="event.stopPropagation();invDeleteOutward(\'' + r2.outward_id + '\')">🗑️</span></td></tr>';
+    }
+    document.getElementById('inv-out-table').innerHTML = h + '</tbody></table>';
+  }).doPost_internal('lpgInv.getOutward', {});
+}
+
+function invAddOutward() {
+  var payload = {
+    date: (document.getElementById('inv-out-date')||{}).value || '',
+    quantity: (document.getElementById('inv-out-qty')||{}).value || '',
+    notes: (document.getElementById('inv-out-notes')||{}).value || '',
+    recorded_by: 'Manager'
+  };
+  if (!payload.date || !payload.quantity) { showToast('Fill date and quantity', 'error'); return; }
+  doPostWithHistoryConfirm('lpgInv.addOutward', payload,
+    function(r) {
+      if (r && r.success) {
+        showToast('Usage recorded', 'success');
+        document.getElementById('inv-out-date').value=''; document.getElementById('inv-out-qty').value=''; document.getElementById('inv-out-notes').value='';
+        invLoadOutward(); invLoadStockSummary();
+      } else showToast((r&&r.error)||'Failed','error');
+    },
+    function(e){ showToast('Error: '+e,'error'); }
+  );
+}
+
+function invOpenEditOutward(id) {
+  invSelectRow(id);
+  var r = null;
+  for (var i=0;i<invOutwardCache.length;i++) if (invOutwardCache[i].outward_id===id) r = invOutwardCache[i];
+  if (!r) return;
+  openModal(
+    '<div class="modal-header"><span class="modal-title">📤 Edit Stock Outward</span>'+
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="form-group"><label>Date</label><input id="inv-oe-date" type="date" value="'+r.date+'"></div>'+
+      '<div class="form-group"><label>Quantity Used</label><input id="inv-oe-qty" type="number" value="'+r.quantity+'"></div>'+
+      '<div class="form-group"><label>Notes</label><input id="inv-oe-notes" value="'+invE(r.notes)+'"></div>'+
+      '<div class="form-actions">'+
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>'+
+        '<button class="btn btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg)" onclick="invDeleteOutward(\'' + id + '\')">🗑 Delete</button>'+
+        '<button class="btn btn-accent" onclick="invSaveEditOutward(\'' + id + '\')">💾 Save</button>'+
+      '</div></div>'
+  );
+}
+
+function invSaveEditOutward(id) {
+  var payload = {
+    date: (document.getElementById('inv-oe-date')||{}).value || '',
+    quantity: (document.getElementById('inv-oe-qty')||{}).value || '',
+    notes: (document.getElementById('inv-oe-notes')||{}).value || '',
+    recorded_by: 'Manager'
+  };
+  if (!payload.date || !payload.quantity) { showToast('Fill all fields', 'error'); return; }
+  google.script.run.withSuccessHandler(function() {
+    google.script.run.withSuccessHandler(function(r2) {
+      if (r2 && r2.success) { showToast('Saved', 'success'); closeModalForce(); invLoadOutward(); invLoadStockSummary(); }
+      else showToast((r2&&r2.error)||'Failed','error');
+    }).doPost_internal('lpgInv.addOutward', payload);
+  }).doPost_internal('lpgInv.deleteOutward', { outward_id: id });
+}
+
+function invDeleteOutward(id) {
+  if (!confirm('Delete this usage record?')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Deleted','success'); closeModalForce(); invLoadOutward(); invLoadStockSummary(); }
+    else showToast((r&&r.error)||'Failed','error');
+  }).doPost_internal('lpgInv.deleteOutward', { outward_id: id });
+}
+
+// ── Inventory vs Bank — always live, read-only ───────────────────
+function invLoadComparison() {
+  var fy = (document.getElementById('inv-cmp-fyear')||{}).value;
+  google.script.run.withSuccessHandler(function(r) {
+    var list = (r && r.success && r.data) ? r.data : [];
+    if (fy) list = list.filter(function(m) { return String(m.year) === fy; });
+    var mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var h = '<table><thead><tr><th>Month</th><th style="text-align:right">Cylinders</th><th style="text-align:right">Cost (Inventory)</th><th style="text-align:right">Cost (Bank/IOB)</th><th style="text-align:right">Diff</th><th>Verify</th></tr></thead><tbody>';
+    if (!list.length) h += '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:16px;">No data for this filter yet.</td></tr>';
+    for (var i=0;i<list.length;i++){
+      var m = list[i];
+      var label = mn[m.month] + ' ' + m.year;
+      h += '<tr' + (m.ok?'':' style="background:var(--c-rejected-bg)"') + '>' +
+        '<td style="font-weight:700">'+label+'</td>'+
+        '<td style="text-align:right">'+m.cylinders+'</td>'+
+        '<td style="text-align:right">₹'+m.cost_inventory.toLocaleString('en-IN')+'</td>'+
+        '<td style="text-align:right">₹'+m.cost_bank.toLocaleString('en-IN')+'</td>'+
+        '<td style="text-align:right">₹'+m.diff.toLocaleString('en-IN')+'</td>'+
+        '<td class="'+(m.ok?'inv-verify-ok':'inv-verify-bad')+'">'+(m.ok?'✅ Correct':'⚠️ Mismatch')+'</td></tr>';
+    }
+    document.getElementById('inv-comp-table').innerHTML = h + '</tbody></table>';
+  }).doPost_internal('lpgInv.getComparison', {});
+}
+
+// ── Monthly P&L ───────────────────────────────────────────────────
+function invLoadPL() {
+  var year = Number((document.getElementById('inv-pl-year')||{}).value);
+  var month = Number((document.getElementById('inv-pl-month')||{}).value);
+  if (!year || !month) return;
+  document.getElementById('inv-pl-stats').innerHTML = loadingHtml('Calculating…');
+  google.script.run.withSuccessHandler(function(r) {
+    var p = (r && r.success && r.data) ? r.data : null;
+    var el = document.getElementById('inv-pl-stats');
+    if (!el || !p) return;
+    var profit = p.profitLoss >= 0;
+    var mn2 = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    el.innerHTML =
+      '<div class="stat-card info"><div class="stat-label">LPG Consumed</div><div class="stat-value" style="font-size:19px">'+p.consumedNM3+' NM³</div><div class="stat-sub">from meter readings</div></div>'+
+      '<div class="stat-card green"><div class="stat-label">Collected from Residents</div><div class="stat-value" style="font-size:19px">'+formatRupees(p.collected)+'</div><div class="stat-sub">paid in '+mn2[p.collectionMonth]+' '+p.collectionYear+'</div></div>'+
+      '<div class="stat-card red"><div class="stat-label">Cylinder Cost</div><div class="stat-value" style="font-size:19px">'+formatRupees(p.cylinderCost)+'</div><div class="stat-sub">'+p.cylindersUsed+' cylinders × ₹'+p.avgCostPerCylinder+'</div></div>'+
+      '<div class="stat-card '+(profit?'green':'red')+'"><div class="stat-label">'+(profit?'Profit':'Loss')+'</div><div class="stat-value" style="font-size:21px">'+formatRupees(Math.abs(p.profitLoss))+'</div><div class="stat-sub">'+(profit?'LPG business is in surplus':'consider raising the LPG rate')+'</div></div>';
+  }).withFailureHandler(function(e){ document.getElementById('inv-pl-stats').innerHTML = '<div style="color:var(--c-rejected-fg)">Error: '+e+'</div>'; })
+    .doPost_internal('lpgInv.getMonthlyPL', { year: year, month: month });
+}
+
+function invE(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>

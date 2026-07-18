@@ -1,0 +1,657 @@
+<!-- DataManagement.html — Export, Import & Bulk Notifications (pure ES5) -->
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">📥 Data Imports</h1>
+    <p class="page-subtitle">Export reports, import bulk data, and send mass notifications</p>
+  </div>
+</div>
+
+<style>
+  /* Collapsible import cards — same pattern as the Settings page: click
+     the header to expand/collapse, "+" collapsed / "−" expanded. */
+  .card.collapsed > .card-body { display: none !important; }
+  .card-header { cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+  .dm-chevron { font-size: 16px; font-weight: 800; color: var(--text-muted); width: 20px; text-align: center; flex-shrink: 0; }
+</style>
+
+<script>
+function dmToggleCard(headEl) {
+  var card = headEl.parentElement;
+  if (!card) return;
+  card.classList.toggle('collapsed');
+  var chev = headEl.querySelector('.dm-chevron');
+  if (chev) chev.textContent = card.classList.contains('collapsed') ? '+' : '−';
+}
+</script>
+
+<!-- ═══════════ One-click Owners.xlsx Import ═══════════ -->
+<div class="card collapsed" style="margin-bottom:20px;">
+  <div class="card-header" onclick="dmToggleCard(this)">
+    <span class="card-title">📗 Import Owners Master Sheet (Excel) — v2</span>
+    <span class="dm-chevron">+</span>
+  </div>
+  <div class="card-body">
+    <div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;font-size:13px;">
+      <strong>💡 One-click import:</strong> Upload your <strong>Owners.xlsx</strong> master sheet exactly as it is —
+      no editing needed. All columns are recognised automatically (Name01–03, Phone No:01–03, Email ID 01–02,
+      Exec Member &amp; Title, Car Parking, Living Status, Residing Country, Addresses, Employer, Work details,
+      TC No, KSEB Consumer No, Notes, Profile Picture, Jan–Dec payments).
+      Rows are matched by FLAT NO. — existing owners are <strong>updated</strong>, new ones <strong>added</strong>,
+      so re-importing the same file is safe.
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+      <div style="flex:1;min-width:220px;">
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">Owners Excel File (.xlsx / .xls / .csv)</label>
+        <input type="file" id="owners-file-input" accept=".xls,.xlsx,.csv"
+          style="display:block;width:100%;padding:8px 10px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);font-size:13px;">
+      </div>
+      <button class="btn btn-accent" id="owners-import-btn"
+        onclick="try { ownersXlsxImport(); } catch(e) { alert('Import button error: ' + e.message + '\n\nPlease report this message.'); }"
+        style="flex-shrink:0;height:38px;">
+        📥 Import Owners Sheet
+      </button>
+    </div>
+    <div id="owners-import-status"></div>
+  </div>
+</div>
+
+<!-- One-click Tenants.xlsx Import -->
+<div class="card collapsed" style="margin-bottom:20px;">
+  <div class="card-header" onclick="dmToggleCard(this)">
+    <span class="card-title">📘 Import Tenants Master Sheet (Excel) — v1</span>
+    <span class="dm-chevron">+</span>
+  </div>
+  <div class="card-body">
+    <div style="background:var(--accent-dim); border:1px solid var(--accent); border-radius:8px; padding:12px 16px; margin-bottom:16px; font-size:13px;">
+      <strong>💡 One-click import:</strong> Upload your <strong>Tenants.xlsx</strong> master sheet exactly as it is.
+      All columns are recognised automatically: Names, Phone, Email, Work, CREDAI, the Jan–Dec waste payment columns,
+      Tenant Names on Bank Statement, vehicles, residents, move-in/out dates, caution deposit, ID proof and WhatsApp details.
+      Rows are matched by FLAT NO. — existing tenants are <strong>updated</strong>, new ones are <strong>added</strong>,
+      and their units are marked <strong>Occupied</strong> automatically.
+    </div>
+    <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px;">
+      <div style="flex:1; min-width:220px;">
+        <label style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; display:block; margin-bottom:5px;">Tenants Excel File (.xlsx / .xls / .csv)</label>
+        <input type="file" id="tenants-file-input" accept=".xls,.xlsx,.csv"
+          style="display:block; width:100%; padding:8px 10px; border:1.5px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--bg-surface); color:var(--text-primary); font-size:13px;">
+      </div>
+      <button class="btn btn-accent" id="tenants-import-btn"
+        onclick="try { tenantsXlsxImport(); } catch(e) { alert('Import button error: ' + e.message); }"
+        style="flex-shrink:0; height:38px;">
+        📥 Import Tenants Sheet
+      </button>
+    </div>
+    <div id="tenants-import-status"></div>
+  </div>
+</div>
+
+<!-- One-click LPG Readings Import -->
+<div class="card collapsed" style="margin-bottom:20px;">
+  <div class="card-header" onclick="dmToggleCard(this)">
+    <span class="card-title">🔥 Import LPG Readings (Excel)</span>
+    <span class="dm-chevron">+</span>
+  </div>
+  <div class="card-body">
+    <div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;font-size:13px;">
+      <strong>💡 One-click import:</strong> Upload a monthly LPG reading sheet in the association's original layout
+      (FLAT NO., Previous, Current, Reading Date, Volume, Factor, Price/Kg, Amount, Payment Date, Paid, Remarks) —
+      no editing needed. Units marked <strong>UNOCCUPIED</strong> are skipped automatically. Paid = Yes rows are
+      recorded as Verified with the sheet's own computed amount; re-importing the same file safely updates
+      existing rows rather than duplicating them.
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">Year</label>
+        <select id="lpg-import-year" style="padding:8px 10px;font-size:13px;"></select>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">Month</label>
+        <select id="lpg-import-month" style="padding:8px 10px;font-size:13px;">
+          <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+          <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+          <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+          <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+        </select>
+      </div>
+      <div style="flex:1;min-width:220px;">
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">LPG Reading File (.xlsx / .xls / .csv)</label>
+        <input type="file" id="lpg-import-file-input" accept=".xls,.xlsx,.csv"
+          style="display:block;width:100%;padding:8px 10px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);font-size:13px;">
+      </div>
+      <button class="btn btn-accent" id="lpg-import-btn"
+        onclick="try { lpgReadingsXlsxImport(); } catch(e) { alert('Import button error: ' + e.message); }"
+        style="flex-shrink:0;height:38px;">
+        📥 Import LPG Readings
+      </button>
+    </div>
+    <div id="lpg-import-status"></div>
+  </div>
+</div>
+
+<!-- One-click Stock Inward Import -->
+<div class="card collapsed" style="margin-bottom:20px;">
+  <div class="card-header" onclick="dmToggleCard(this)">
+    <span class="card-title">📥 Import LPG Stock Inward (Excel)</span>
+    <span class="dm-chevron">+</span>
+  </div>
+  <div class="card-body">
+    <div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;font-size:13px;">
+      <strong>💡 One-click import:</strong> Upload a cylinder-purchase log in the association's original layout
+      (#, Invoice Number, Date, Cost of 1 Cylinder, No. of Cylinders, Total Amount). A row is never dropped just
+      because its date couldn't be read — it's imported with a blank date and flagged for a quick manual fix on the
+      LPG Inventory page, so no real stock ever silently disappears.
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+      <div style="flex:1;min-width:220px;">
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">Stock Inward File (.xlsx / .xls / .csv)</label>
+        <input type="file" id="inv-in-file-input" accept=".xls,.xlsx,.csv"
+          style="display:block;width:100%;padding:8px 10px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);font-size:13px;">
+      </div>
+      <button class="btn btn-accent" id="inv-in-import-btn"
+        onclick="try { dmImportStockInward(); } catch(e) { alert('Import button error: ' + e.message); }"
+        style="flex-shrink:0;height:38px;">
+        📥 Import Stock Inward
+      </button>
+    </div>
+    <div id="inv-in-import-status"></div>
+  </div>
+</div>
+
+<!-- One-click Stock Outward Import -->
+<div class="card collapsed" style="margin-bottom:20px;">
+  <div class="card-header" onclick="dmToggleCard(this)">
+    <span class="card-title">📤 Import LPG Stock Outward (Excel)</span>
+    <span class="dm-chevron">+</span>
+  </div>
+  <div class="card-body">
+    <div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;font-size:13px;">
+      <strong>💡 One-click import:</strong> Upload a cylinder-usage log in the association's original layout
+      (#, Date, No. of Cylinders used). Same safeguard as Stock Inward — an unreadable date never causes a row's
+      cylinders to be dropped from the count.
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+      <div style="flex:1;min-width:220px;">
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">Stock Outward File (.xlsx / .xls / .csv)</label>
+        <input type="file" id="inv-out-file-input" accept=".xls,.xlsx,.csv"
+          style="display:block;width:100%;padding:8px 10px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);font-size:13px;">
+      </div>
+      <button class="btn btn-accent" id="inv-out-import-btn"
+        onclick="try { dmImportStockOutward(); } catch(e) { alert('Import button error: ' + e.message); }"
+        style="flex-shrink:0;height:38px;">
+        📥 Import Stock Outward
+      </button>
+    </div>
+    <div id="inv-out-import-status"></div>
+  </div>
+</div>
+
+<!-- One-click Caretaker's Monthly Expenses Import -->
+<div class="card collapsed" style="margin-bottom:20px;">
+  <div class="card-header" onclick="dmToggleCard(this)">
+    <span class="card-title">🧾 Import Caretaker's Monthly Expenses (Excel)</span>
+    <span class="dm-chevron">+</span>
+  </div>
+  <div class="card-body">
+    <div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;font-size:13px;">
+      <strong>💡 One-click import:</strong> Upload the association's own Caretaker's Monthly Report file for one
+      month — this reads the "MANAGER'S EXPENSES" table (Date, Voucher No., Description, Amount) and adds each
+      row to the Reports page's Caretaker ledger. Since that report covers exactly one month at a time, pick the
+      Year and Month this specific file is for below; the file's own date cells are only used for the day of month.
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">Year</label>
+        <select id="ck-year" style="padding:8px 10px;font-size:13px;"></select>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">Month</label>
+        <select id="ck-month" style="padding:8px 10px;font-size:13px;">
+          <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+          <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+          <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+          <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+        </select>
+      </div>
+      <div style="flex:1;min-width:220px;">
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">Caretaker's Monthly Report File (.xlsx / .xls / .csv)</label>
+        <input type="file" id="ck-file-input" accept=".xls,.xlsx,.csv"
+          style="display:block;width:100%;padding:8px 10px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);font-size:13px;">
+      </div>
+      <button class="btn btn-accent" id="ck-import-btn"
+        onclick="try { dmImportCaretakerExpenses(); } catch(e) { alert('Import button error: ' + e.message); }"
+        style="flex-shrink:0;height:38px;">
+        📥 Import Expenses
+      </button>
+    </div>
+    <div id="ck-import-status"></div>
+  </div>
+</div>
+
+<script>
+// All functions namespaced dm*/owners* — nothing runs at top level.
+
+var DM_EXPORTS = [
+  { action:'export.units',          icon:'🏢', label:'Units Report',      desc:'All units with owners and tenants',        file:'units_report.csv' },
+  { action:'export.owners',         icon:'👤', label:'Owners',            desc:'Full owner master data',                   file:'owners.csv' },
+  { action:'export.tenants',        icon:'🏠', label:'Tenants',           desc:'All tenant records',                       file:'tenants.csv' },
+  { action:'export.payments',       icon:'💳', label:'Payments',          desc:'Complete payment ledger',                  file:'payments.csv' },
+  { action:'export.defaulters',     icon:'⚠️', label:'Defaulters',        desc:'Current month defaulter list',             file:'defaulters.csv' },
+  { action:'export.monthlySummary', icon:'📊', label:'Monthly Summary',   desc:'Collections summary by month and type',    file:'monthly_summary.csv' }
+];
+
+function dmStatusBox(elId, msg, type) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  if (!msg) { el.innerHTML = ''; return; }
+  var bg = type === 'success' ? 'var(--c-verified-bg)' :
+           type === 'error'   ? 'var(--c-rejected-bg)' :
+           type === 'warn'    ? 'var(--c-pending-bg)'  : 'var(--bg-surface2)';
+  var fg = type === 'success' ? 'var(--c-verified-fg)' :
+           type === 'error'   ? 'var(--c-rejected-fg)' :
+           type === 'warn'    ? 'var(--c-pending-fg)'  : 'var(--text-secondary)';
+  el.innerHTML = '<div style="padding:10px 14px;border-radius:var(--radius-sm);background:' + bg +
+    ';color:' + fg + ';font-size:13px;border:1px solid ' + fg + '30;">' + msg + '</div>';
+}
+
+/* ── Exports ─────────────────────────────────────────────────── */
+
+
+function dmDownloadCsv(csvText, filename) {
+  var a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF' + csvText);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function dmSaveToDrive(csvText, filename, label) {
+  dmStatusBox('export-status', '⏳ Saving ' + label + ' to Google Drive…', 'info');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (res && res.success && res.data && res.data.url) {
+        dmStatusBox('export-status',
+          '✓ ' + label + ' saved to Drive — <a href="' + res.data.url + '" target="_blank">Open file 🔗</a>',
+          'success');
+      } else {
+        dmStatusBox('export-status', '❌ Drive save failed: ' + (res && res.error || 'unknown'), 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      dmStatusBox('export-status', '❌ Error: ' + String(err), 'error');
+    })
+    .doPost_internal('export.saveToDrive', { csvContent: csvText, filename: filename });
+}
+
+/* ── One-click Owners.xlsx import ────────────────────────────── */
+function tenantsXlsxImport() {
+  var inp = document.getElementById('tenants-file-input');
+  var btn = document.getElementById('tenants-import-btn');
+  function stat(msg, type) { dmStatusBox('tenants-import-status', msg, type); }
+
+  stat('⏳ Checking file…', 'info');
+  if (!inp || !inp.files || inp.files.length === 0) {
+    stat('⚠️ Please select your Tenants Excel file first.', 'warn'); return;
+  }
+  var file = inp.files[0];
+  var ext  = file.name.split('.').pop().toLowerCase();
+  if (['xls','xlsx','csv'].indexOf(ext) < 0) {
+    stat('❌ Please select an XLS, XLSX or CSV file.', 'error'); return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Importing…'; }
+  stat('⏳ Reading ' + file.name + ' (' + Math.round(file.size/1024) + ' KB)…', 'info');
+
+  var reader = new FileReader();
+  reader.onerror = function() {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 Import Tenants Sheet'; }
+    stat('❌ Could not read the file. Please try again.', 'error');
+  };
+  reader.onload = function(ev) {
+    var payload;
+    try {
+      if (ext === 'csv') {
+        payload = { type: 'csv', content: ev.target.result, filename: file.name };
+      } else {
+        var arr = new Uint8Array(ev.target.result);
+        var bin = '';
+        for (var i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+        payload = { type: 'xls', content: btoa(bin), filename: file.name };
+      }
+    } catch (convErr) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import Tenants Sheet'; }
+      stat('❌ Conversion error: ' + convErr.message, 'error'); return;
+    }
+
+    stat('⏳ Uploading, converting and importing on the server…', 'info');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Import Tenants Sheet'; }
+        if (!res || !res.success) {
+          stat('❌ Import failed: ' + (res ? res.error : 'no response'), 'error'); return;
+        }
+        var r   = res.data || {};
+        var msg = '✓ Import complete! <strong>' + (r.imported || 0) + ' tenants added</strong> · ' +
+                  '<strong>' + (r.updated || 0) + ' updated</strong> · ' +
+                  '<strong>' + (r.unitsMarked || 0) + ' units marked Occupied</strong>. Open the Tenants page to see them.' +
+                  (r.schema ? '<br><small style="opacity:.7">Schema: ' + r.schema + '</small>' : '');
+        if (r.errors && r.errors.length > 0) {
+          msg += '<br><small>⚠️ ' + r.errors.length + ' row(s) skipped: ' +
+                 r.errors.slice(0, 3).join(' | ') + (r.errors.length > 3 ? ' …' : '') + '</small>';
+          stat(msg, 'warn');
+        } else {
+          stat(msg, 'success');
+        }
+        inp.value = '';
+      })
+      .withFailureHandler(function(err) {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Import Tenants Sheet'; }
+        stat('❌ Server call failed: ' + String(err), 'error');
+      })
+      .importTenantsFile(payload);
+  };
+  if (ext === 'csv') reader.readAsText(file);
+  else reader.readAsArrayBuffer(file);
+}
+
+function ownersXlsxImport() {
+  dmStatusBox('owners-import-status', '⏳ Checking file…', 'info');
+
+  var inp = document.getElementById('owners-file-input');
+  if (!inp || !inp.files || inp.files.length === 0) {
+    dmStatusBox('owners-import-status', '⚠️ Please select your Owners Excel file first.', 'warn');
+    return;
+  }
+
+  var file = inp.files[0];
+  var ext  = file.name.split('.').pop().toLowerCase();
+  if (ext !== 'xls' && ext !== 'xlsx' && ext !== 'csv') {
+    dmStatusBox('owners-import-status', '❌ Please select an XLS, XLSX or CSV file.', 'error');
+    return;
+  }
+
+  var btn = document.getElementById('owners-import-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Reading…'; }
+  dmStatusBox('owners-import-status',
+    '⏳ Step 1/2 — Reading ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)…', 'info');
+
+  var reader = new FileReader();
+
+  reader.onerror = function() {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 Import Owners Sheet'; }
+    dmStatusBox('owners-import-status', '❌ Could not read the file. Please try again.', 'error');
+  };
+
+  reader.onload = function(ev) {
+    var payload;
+    try {
+      if (ext === 'csv') {
+        payload = { type: 'csv', content: ev.target.result, filename: file.name };
+      } else {
+        var arr = new Uint8Array(ev.target.result);
+        var bin = '';
+        for (var i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+        payload = { type: 'xls', content: btoa(bin), filename: file.name };
+      }
+    } catch (convErr) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import Owners Sheet'; }
+      dmStatusBox('owners-import-status', '❌ Conversion error: ' + convErr.message, 'error');
+      return;
+    }
+
+    if (btn) btn.textContent = '⏳ Importing…';
+    dmStatusBox('owners-import-status',
+      '⏳ Step 2/2 — Server is converting the file and importing all owners… this can take up to a minute for 136 rows.', 'info');
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Import Owners Sheet'; }
+        if (!res || !res.success) {
+          dmStatusBox('owners-import-status', '❌ Import failed: ' + (res ? res.error : 'no response'), 'error');
+          return;
+        }
+        var r   = res.data || {};
+        var msg = '✓ Import complete! <strong>' + (r.imported || 0) + ' owners added</strong> · ' +
+                  '<strong>' + (r.updated || 0) + ' updated</strong>. Open the 👤 Owners page to see them.' +
+                  (r.schema ? '<br><small style="opacity:.7">Schema: ' + r.schema + '</small>' : '');
+        if (r.errors && r.errors.length > 0) {
+          msg += '<br><small>⚠️ ' + r.errors.length + ' row(s) skipped: ' +
+                 r.errors.slice(0, 3).join(' | ') + (r.errors.length > 3 ? ' …' : '') + '</small>';
+          dmStatusBox('owners-import-status', msg, 'warn');
+        } else {
+          dmStatusBox('owners-import-status', msg, 'success');
+        }
+        inp.value = '';
+      })
+      .withFailureHandler(function(err) {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Import Owners Sheet'; }
+        dmStatusBox('owners-import-status', '❌ Server call failed: ' + String(err), 'error');
+      })
+      .importOwnersFile(payload);
+  };
+
+  if (ext === 'csv') reader.readAsText(file);
+  else reader.readAsArrayBuffer(file);
+}
+
+function dmImportStockInward() {
+  dmStatusBox('inv-in-import-status', '⏳ Checking file…', 'info');
+  var inp = document.getElementById('inv-in-file-input');
+  if (!inp || !inp.files || !inp.files.length) { dmStatusBox('inv-in-import-status', '⚠️ Please select a file first.', 'warn'); return; }
+  var file = inp.files[0], ext = file.name.split('.').pop().toLowerCase();
+  var btn = document.getElementById('inv-in-import-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Importing…'; }
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var payload = ext === 'csv'
+      ? { type: 'csv', content: ev.target.result, filename: file.name }
+      : { type: 'xls', content: btoa(_dmBinFromArrayBuffer(ev.target.result)), filename: file.name };
+    google.script.run.withSuccessHandler(function(res) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import Stock Inward'; }
+      if (!res || !res.success) { dmStatusBox('inv-in-import-status', '❌ ' + (res ? res.error : 'failed'), 'error'); return; }
+      var d = res.data;
+      var msg = '✓ ' + d.imported + ' purchase(s) imported.';
+      if (d.warnings && d.warnings.length) msg += ' ⚠️ ' + d.warnings.length + ' row(s) need a manual date fix (see LPG Inventory page).';
+      if (d.errors && d.errors.length) msg += ' ❌ ' + d.errors.length + ' row(s) failed.';
+      dmStatusBox('inv-in-import-status', msg, (d.errors && d.errors.length) ? 'warn' : 'success');
+      inp.value = '';
+    }).withFailureHandler(function(e) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import Stock Inward'; }
+      dmStatusBox('inv-in-import-status', '❌ ' + e, 'error');
+    }).importLPGStockInwardFile(payload);
+  };
+  if (ext === 'csv') reader.readAsText(file); else reader.readAsArrayBuffer(file);
+}
+
+function dmImportStockOutward() {
+  dmStatusBox('inv-out-import-status', '⏳ Checking file…', 'info');
+  var inp = document.getElementById('inv-out-file-input');
+  if (!inp || !inp.files || !inp.files.length) { dmStatusBox('inv-out-import-status', '⚠️ Please select a file first.', 'warn'); return; }
+  var file = inp.files[0], ext = file.name.split('.').pop().toLowerCase();
+  var btn = document.getElementById('inv-out-import-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Importing…'; }
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var payload = ext === 'csv'
+      ? { type: 'csv', content: ev.target.result, filename: file.name }
+      : { type: 'xls', content: btoa(_dmBinFromArrayBuffer(ev.target.result)), filename: file.name };
+    google.script.run.withSuccessHandler(function(res) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import Stock Outward'; }
+      if (!res || !res.success) { dmStatusBox('inv-out-import-status', '❌ ' + (res ? res.error : 'failed'), 'error'); return; }
+      var d = res.data;
+      var msg = '✓ ' + d.imported + ' usage record(s) imported.';
+      if (d.warnings && d.warnings.length) msg += ' ⚠️ ' + d.warnings.length + ' row(s) need a manual date fix (see LPG Inventory page).';
+      if (d.errors && d.errors.length) msg += ' ❌ ' + d.errors.length + ' row(s) failed.';
+      dmStatusBox('inv-out-import-status', msg, (d.errors && d.errors.length) ? 'warn' : 'success');
+      inp.value = '';
+    }).withFailureHandler(function(e) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import Stock Outward'; }
+      dmStatusBox('inv-out-import-status', '❌ ' + e, 'error');
+    }).importLPGStockOutwardFile(payload);
+  };
+  if (ext === 'csv') reader.readAsText(file); else reader.readAsArrayBuffer(file);
+}
+
+function dmPopulateCaretakerYearSelect() {
+  var sel = document.getElementById('ck-year');
+  if (!sel || sel.options.length) return;
+  var now = new Date(), years = [];
+  for (var y = now.getFullYear() + 1; y >= 2023; y--) years.push(y);
+  sel.innerHTML = years.map(function(yy) { return '<option value="' + yy + '">' + yy + '</option>'; }).join('');
+  // Default to the Active Year (Settings), not today's real-world date —
+  // defaulting to "now" here made it easy to import a whole month's data
+  // under the wrong year without noticing, since the dropdown looked
+  // pre-filled and reasonable either way.
+  google.script.run.withSuccessHandler(function(r) {
+    sel.value = String((r && r.success) ? r.data : now.getFullYear());
+  }).withFailureHandler(function() {
+    sel.value = String(now.getFullYear());
+  }).doPost_internal('settings.getActiveYear', {});
+}
+
+function dmImportCaretakerExpenses() {
+  dmPopulateCaretakerYearSelect();
+  dmStatusBox('ck-import-status', '⏳ Checking file…', 'info');
+  var inp = document.getElementById('ck-file-input');
+  if (!inp || !inp.files || !inp.files.length) { dmStatusBox('ck-import-status', '⚠️ Please select a file first.', 'warn'); return; }
+  var year = Number((document.getElementById('ck-year')||{}).value);
+  var month = Number((document.getElementById('ck-month')||{}).value);
+  if (!year || !month) { dmStatusBox('ck-import-status', '⚠️ Choose the Year and Month this file is for.', 'warn'); return; }
+  var file = inp.files[0], ext = file.name.split('.').pop().toLowerCase();
+  var btn = document.getElementById('ck-import-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Importing…'; }
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var payload = ext === 'csv'
+      ? { type: 'csv', content: ev.target.result, filename: file.name }
+      : { type: 'xls', content: btoa(_dmBinFromArrayBuffer(ev.target.result)), filename: file.name };
+    google.script.run.withSuccessHandler(function(res) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import Expenses'; }
+      if (!res || !res.success) { dmStatusBox('ck-import-status', '❌ ' + (res ? res.error : 'failed'), 'error'); return; }
+      var d = res.data;
+      var msg = '✓ ' + d.imported + ' expense(s) imported.';
+      if (d.warnings && d.warnings.length) msg += ' ⚠️ ' + d.warnings.length + ' warning(s).';
+      if (d.errors && d.errors.length) {
+        msg += ' ❌ ' + d.errors.length + ' row(s) failed:<br><ul style="margin:6px 0 0 18px;padding:0;">' +
+          d.errors.map(function(e){ return '<li style="font-size:12px;">' + e.replace(/</g,'&lt;') + '</li>'; }).join('') + '</ul>';
+      }
+      dmStatusBox('ck-import-status', msg, (d.errors && d.errors.length) ? 'warn' : 'success');
+      inp.value = '';
+    }).withFailureHandler(function(e) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import Expenses'; }
+      dmStatusBox('ck-import-status', '❌ ' + e, 'error');
+    }).importCaretakerExpensesFile(payload, year, month);
+  };
+  if (ext === 'csv') reader.readAsText(file); else reader.readAsArrayBuffer(file);
+}
+
+function _dmBinFromArrayBuffer(buf) {
+  var arr = new Uint8Array(buf), bin = '';
+  for (var i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+  return bin;
+}
+
+function lpgReadingsXlsxImport() {
+  dmStatusBox('lpg-import-status', '⏳ Checking file…', 'info');
+
+  var inp = document.getElementById('lpg-import-file-input');
+  if (!inp || !inp.files || inp.files.length === 0) {
+    dmStatusBox('lpg-import-status', '⚠️ Please select the LPG reading file first.', 'warn');
+    return;
+  }
+  var year  = Number(document.getElementById('lpg-import-year').value);
+  var month = Number(document.getElementById('lpg-import-month').value);
+
+  var file = inp.files[0];
+  var ext  = file.name.split('.').pop().toLowerCase();
+  if (ext !== 'xls' && ext !== 'xlsx' && ext !== 'csv') {
+    dmStatusBox('lpg-import-status', '❌ Please select an XLS, XLSX or CSV file.', 'error');
+    return;
+  }
+
+  var btn = document.getElementById('lpg-import-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Reading…'; }
+  dmStatusBox('lpg-import-status', '⏳ Step 1/2 — Reading ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)…', 'info');
+
+  var reader = new FileReader();
+  reader.onerror = function() {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 Import LPG Readings'; }
+    dmStatusBox('lpg-import-status', '❌ Could not read the file. Please try again.', 'error');
+  };
+  reader.onload = function(ev) {
+    var payload;
+    try {
+      if (ext === 'csv') {
+        payload = { type: 'csv', content: ev.target.result, filename: file.name };
+      } else {
+        var arr = new Uint8Array(ev.target.result);
+        var bin = '';
+        for (var i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+        payload = { type: 'xls', content: btoa(bin), filename: file.name };
+      }
+    } catch (convErr) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import LPG Readings'; }
+      dmStatusBox('lpg-import-status', '❌ Conversion error: ' + convErr.message, 'error');
+      return;
+    }
+
+    if (btn) btn.textContent = '⏳ Importing…';
+    dmStatusBox('lpg-import-status', '⏳ Step 2/2 — Converting and importing readings for ' + month + '/' + year + '…', 'info');
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Import LPG Readings'; }
+        if (!res || !res.success) {
+          dmStatusBox('lpg-import-status', '❌ Import failed: ' + (res ? res.error : 'no response'), 'error');
+          return;
+        }
+        var r = res.data || {};
+        var msg = '✓ Import complete! <strong>' + (r.imported || 0) + ' readings saved</strong> for that month · ' +
+                  r.skippedUO + ' Unoccupied skipped · ' + r.skippedNoReading + ' had no current reading (left pending). ' +
+                  'Open the 🔥 LPG Readings page to review.';
+        if (r.errors && r.errors.length > 0) {
+          msg += '<br><small>⚠️ ' + r.errors.length + ' row(s) had issues: ' + r.errors.slice(0, 3).join(' | ') + (r.errors.length > 3 ? ' …' : '') + '</small>';
+          dmStatusBox('lpg-import-status', msg, 'warn');
+        } else {
+          dmStatusBox('lpg-import-status', msg, 'success');
+        }
+        inp.value = '';
+      })
+      .withFailureHandler(function(err) {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Import LPG Readings'; }
+        dmStatusBox('lpg-import-status', '❌ Server call failed: ' + String(err), 'error');
+      })
+      .importLPGReadingsFile(payload, year, month);
+  };
+
+  if (ext === 'csv') reader.readAsText(file);
+  else reader.readAsArrayBuffer(file);
+}
+
+/* ── Paste-CSV imports ───────────────────────────────────────── */
+
+/* ── Bulk reminders ──────────────────────────────────────────── */
+
+/* ── Page init — called by Index.html navigateTo ─────────────── */
+function dataPageInit() {
+  var lySel = document.getElementById('lpg-import-year');
+  if (lySel && !lySel.options.length) {
+    var now = new Date(), years = [];
+    for (var y = now.getFullYear(); y >= 2023; y--) years.push(y);
+    lySel.innerHTML = years.map(function(yy){ return '<option value="'+yy+'">'+yy+'</option>'; }).join('');
+    lySel.value = String(now.getFullYear());
+  }
+  dmPopulateCaretakerYearSelect();
+
+  // Backup binding — works even if the inline onclick is stripped
+  var btn = document.getElementById('owners-import-btn');
+  if (btn && !btn.getAttribute('data-bound')) {
+    btn.setAttribute('data-bound', '1');
+    btn.onclick = function() {
+      try { ownersXlsxImport(); }
+      catch (e) { alert('Import error: ' + e.message); }
+    };
+  }
+}
+</script>

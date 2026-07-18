@@ -1,0 +1,654 @@
+<!-- Payments.html — Unified Fee Payments page (Maintenance / Waste / LPG) · v2 -->
+<div class="page-header">
+  <div>
+    <h1 class="page-title">💰 Fees Received by the Association</h1>
+    <p class="page-subtitle">Maintenance · Waste Management · LPG — fees received per unit, from the central ledger</p>
+  </div>
+  <button class="btn btn-outline btn-sm" onclick="loadPayments()">↻ Refresh</button>
+</div>
+
+<div class="stats-grid" id="fees-stats" style="margin-bottom:16px;"></div>
+
+<div class="filters-row" style="align-items:center;">
+  <div style="display:flex;gap:0;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);overflow:hidden;">
+    <button class="fee-tab" id="fee-tab-mf"  onclick="feesSetType('Maintenance')">🏠 Maintenance</button>
+    <button class="fee-tab" id="fee-tab-wm"  onclick="feesSetType('Waste Management')">♻️ Waste Mgmt</button>
+    <button class="fee-tab" id="fee-tab-lpg" onclick="feesSetType('LPG')">🔥 LPG</button>
+    <button class="fee-tab" id="fee-tab-cd"  onclick="feesSetType('Caution Deposit')">🛡️ Caution Dep.</button>
+    <button class="fee-tab" id="fee-tab-ph"  onclick="feesSetType('Party Hall Rental')">🎉 Party Hall</button>
+    <button class="fee-tab" id="fee-tab-ms"  onclick="feesSetType('Miscellaneous')">📦 Misc.</button>
+  </div>
+  <select id="fee-f-year" onchange="feesRender()"></select>
+  <select id="fee-f-status" onchange="feesRender()">
+    <option value="">All Units</option>
+    <option value="any">Paid</option>
+    <option value="paid">Fully Paid (year)</option>
+    <option value="pending">Has Pending</option>
+    <option value="uo">Unoccupied</option>
+  </select>
+  <div class="search-bar" style="max-width:240px;">
+    <span class="search-icon">🔍</span>
+    <input type="text" id="fee-search" placeholder="Unit, owner, tenant…" oninput="feesRender()">
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title" id="fees-title">📋 Fee Status</span>
+    <span id="fees-count" style="font-size:12px;color:var(--text-muted)"></span>
+  </div>
+  <div class="card-body" style="padding:0" id="fees-table">
+    <div class="loading"><div class="spinner"></div> Loading…</div>
+  </div>
+</div>
+
+<style>
+  .fee-tab {
+    border:none;background:var(--bg-surface);color:var(--text-secondary);
+    padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;
+    border-right:1px solid var(--border);
+  }
+  .fee-tab:last-child { border-right:none; }
+  .fee-tab.active { background:var(--accent);color:#fff; }
+  #fees-table thead th { position:-webkit-sticky;position:sticky;top:0;z-index:3; }
+  /* TOTAL and DEFAULTERS rows stack directly below the main header row
+     and stay in view while scrolling too — each needs its own sticky
+     offset equal to the height of the row(s) above it. */
+  #fees-table thead tr.fee-sum:nth-of-type(2) th { position:-webkit-sticky;position:sticky;top:37px;z-index:3; }
+  #fees-table thead tr.fee-sum:nth-of-type(3) th { position:-webkit-sticky;position:sticky;top:74px;z-index:3; }
+  /* The corner cells (Unit/Owner + the TOTAL/DEFAULTERS labels) are
+     sticky BOTH ways. The generic .fee-sticky rule below has higher
+     specificity than the thead rules above, so its z-index:2 was
+     putting the Unit/Owner header cell on the SAME layer as the body's
+     sticky column — body cells painted over it during vertical scroll,
+     which made that one cell look like it wasn't sticky at all. Restate
+     each corner cell's top offset and lift them above everything else. */
+  #fees-table thead th.fee-sticky { top:0; z-index:6; }
+  #fees-table thead tr.fee-sum:nth-of-type(2) th.fee-sticky { top:37px; z-index:6; }
+  #fees-table thead tr.fee-sum:nth-of-type(3) th.fee-sticky { top:74px; z-index:6; }
+  /* Headers: darker, slightly bigger, one consistent colour */
+  #fees-table th {
+    color: var(--text-primary) !important;
+    font-size: 12.5px;
+    font-weight: 800;
+    background: var(--bg-surface2);
+  }
+  /* The sticky-left Unit/Owner column previously showed a different
+     shade here than every other header cell, because its own
+     left-sticky rule (needed for the horizontal-scroll trick) set a
+     background that unintentionally overrode the standard header
+     color. Forced back to match every other header cell exactly,
+     and sized up for legibility along with the TOTAL/DEFAULTERS labels. */
+  #fees-table thead th.fee-sticky { background: var(--bg-surface2) !important; font-size: 13.5px !important; }
+  #fees-table tr.fee-sum th.fee-sticky { font-size: 13px !important; }
+  /* Clearer row + column lines. border-collapse:collapse paints borders
+     at the TABLE level, so they scrolled away from the sticky header
+     cells (the header's grid lines "disappeared" while scrolling).
+     separate + border-spacing:0 keeps each cell's border attached to
+     the cell itself; right/bottom-only borders (plus left/top on the
+     first column/row) avoid doubled 2px lines between cells. */
+  #fees-table table { border-collapse: separate; border-spacing: 0; }
+  #fees-table td, #fees-table th {
+    border-right: 1px solid var(--border-strong, rgba(128,128,128,.35));
+    border-bottom: 1px solid var(--border-strong, rgba(128,128,128,.35));
+  }
+  #fees-table td:first-child, #fees-table th:first-child { border-left: 1px solid var(--border-strong, rgba(128,128,128,.35)); }
+  #fees-table thead tr:first-child th { border-top: 1px solid var(--border-strong, rgba(128,128,128,.35)); }
+  /* Hover highlight */
+  #fees-table tbody tr:hover td { background: rgba(0,200,150,.07); }
+  /* Active (selected / just-edited) row — stays until another row is selected */
+  #fees-table tbody tr.fee-row-active td { background: rgba(0,200,150,.16) !important; }
+  #fees-table tbody tr.fee-row-active td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  .fee-cell {
+    text-align:center;font-size:11.5px;font-weight:700;border-radius:5px;
+    padding:5px 4px;cursor:pointer;min-width:46px;transition:transform .08s;
+  }
+  .fee-cell:hover { transform:scale(1.08); }
+  .fee-cell-paid { background:var(--c-occupied-bg);color:var(--c-occupied-fg); }
+  .fee-cell-pend { background:var(--c-rejected-bg);color:var(--c-rejected-fg);opacity:.65;font-weight:800; }
+  .fee-cell-policy { background:var(--c-occupied-bg);color:var(--c-occupied-fg);opacity:.55;cursor:default; }
+  .fee-cell-uo {
+    background:rgba(100,116,139,.18);color:#64748b;cursor:default;
+    font-weight:800;letter-spacing:.5px;
+  }
+  #fees-table td.fee-td { padding:4px 3px; }
+  #fees-table .fee-sticky { position:-webkit-sticky;position:sticky;left:0;background:var(--bg-surface);z-index:2; }
+</style>
+
+<script>
+var feesType   = 'Maintenance';
+var feesActiveUnit = '';   // row highlighted after selection/editing
+// Only these are monthly per-unit obligations; the rest are occasional income,
+// so they get no defaulter counts and no red pending cells.
+var FEES_OBLIGATORY = { 'Maintenance':1, 'Waste Management':1, 'LPG':1 };
+// Maintenance is owner-billed; everything else here is what the resident
+// actually consumes/uses, so the unit column should show who lives there
+// now, not who owns it.
+var FEES_TENANT_PAID = { 'Waste Management':1, 'LPG':1, 'Caution Deposit':1, 'Party Hall Rental':1 };
+var feesUnits  = [];
+var feesOwners = {};
+var feesTenants= {};
+var paysAll    = [];
+var feesPayMap = {};   // 'UNIT|TYPE|YYYY-MM' -> payment object
+var feesOccupancyByYear = {}; // year -> { unit_id: [ {occupancy, lpg_mode} x12, Jan..Dec ] } — fetched once per year, reused across re-renders
+var FEE_MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+
+function loadPayments() {
+  document.getElementById('fees-table').innerHTML = loadingHtml('Loading fee data…');
+  feesInitYearSelect();
+  var d = { u:false, o:false, t:false, p:false };
+  function tryRender() { if (d.u && d.o && d.t && d.p) feesRender(); }
+
+  google.script.run.withSuccessHandler(function(r) {
+    feesUnits = (r && r.success && r.data) ? r.data : [];
+    feesUnits.sort(function(a, b) { return a.unit_id < b.unit_id ? -1 : a.unit_id > b.unit_id ? 1 : 0; });
+    d.u = true; tryRender();
+  }).withFailureHandler(function(e) {
+    document.getElementById('fees-table').innerHTML = '<div style="color:var(--c-rejected-fg);padding:20px">Error: ' + e + '</div>';
+  }).doPost_internal('units.getAll', {});
+
+  google.script.run.withSuccessHandler(function(r) {
+    feesOwners = {};
+    var os = (r && r.success && r.data) ? r.data : [];
+    for (var i = 0; i < os.length; i++) feesOwners[String(os[i].unit_id).toUpperCase()] = os[i];
+    d.o = true; tryRender();
+  }).withFailureHandler(function() { d.o = true; tryRender(); }).doPost_internal('owners.getAll', {});
+
+  google.script.run.withSuccessHandler(function(r) {
+    feesTenants = {};
+    var ts = (r && r.success && r.data) ? r.data : [];
+    for (var i = 0; i < ts.length; i++) feesTenants[String(ts[i].unit_id).toUpperCase()] = ts[i];
+    d.t = true; tryRender();
+  }).withFailureHandler(function() { d.t = true; tryRender(); }).doPost_internal('tenants.getAll', {});
+
+  google.script.run.withSuccessHandler(function(r) {
+    paysAll = (r && r.success && r.data) ? r.data : [];
+    feesPayMap = {};
+    for (var i = 0; i < paysAll.length; i++) {
+      var p = paysAll[i];
+      // A recorded payment counts as received. Only explicitly Rejected
+      // entries are excluded (there is no submit/review workflow here).
+      if (p.status === 'Rejected') continue;
+      var key = String(p.unit_id).toUpperCase() + '|' + p.payment_type + '|' + p.month;
+      // A unit can legitimately have more than one payment for the same
+      // month (e.g. two separate bank transactions, each split, each
+      // contributing part of the same month's fee) — combine them into
+      // one total instead of letting a later one silently replace an
+      // earlier one.
+      if (feesPayMap[key]) {
+        var combined = {}; for (var fk in feesPayMap[key]) combined[fk] = feesPayMap[key][fk];
+        combined.amount = (Number(feesPayMap[key].amount) || 0) + (Number(p.amount) || 0);
+        feesPayMap[key] = combined;
+      } else {
+        feesPayMap[key] = p;
+      }
+    }
+    feesInitYearSelect();
+    d.p = true; tryRender();
+  }).withFailureHandler(function() { d.p = true; tryRender(); }).doPost_internal('payments.getAll', {});
+}
+
+// Year list builds itself: 2023 up to the current year, plus any future year
+// that already has a recorded payment (advance payments). 2027, 2028… appear
+// automatically — no code change ever needed.
+function feesInitYearSelect() {
+  var sel = document.getElementById('fee-f-year');
+  if (!sel) return;
+  var now = new Date(), curY = now.getFullYear();
+  var years = {};
+  for (var y = 2023; y <= curY; y++) years[y] = true;
+  for (var k in feesPayMap) {
+    var m = k.match(/\|(\d{4})-\d{2}$/);
+    if (m) years[parseInt(m[1], 10)] = true;
+  }
+  var list = []; for (var yk in years) list.push(parseInt(yk, 10));
+  list.sort(function(a, b) { return b - a; });
+  var prev = sel.value;
+  var h = '';
+  for (var i = 0; i < list.length; i++) h += '<option value="' + list[i] + '">' + list[i] + '</option>';
+  sel.innerHTML = h;
+  sel.value = prev && years[parseInt(prev, 10)] ? prev : String(curY);
+}
+
+function feesSetType(t) {
+  feesType = t;
+  feesRender();
+}
+
+function feesMonthKey(year, monthNum) {
+  return year + '-' + (monthNum < 10 ? '0' + monthNum : String(monthNum));
+}
+
+// PAID info for unit/type/year/month: payment object, 'POLICY' (2023–25), or null
+function feesPaidInfo(unitId, type, year, monthNum) {
+  // 2023–2025 now show ACTUAL data (bank-imported + manual), no blanket policy.
+  return feesPayMap[String(unitId).toUpperCase() + '|' + type + '|' + feesMonthKey(year, monthNum)] || null;
+}
+
+function feesRender() {
+  // Tab highlight
+  var tabs = { 'Maintenance':'fee-tab-mf', 'Waste Management':'fee-tab-wm', 'LPG':'fee-tab-lpg',
+               'Caution Deposit':'fee-tab-cd', 'Party Hall Rental':'fee-tab-ph', 'Miscellaneous':'fee-tab-ms' };
+  for (var k in tabs) {
+    var el = document.getElementById(tabs[k]);
+    if (el) el.className = 'fee-tab' + (feesType === k ? ' active' : '');
+  }
+
+  var year  = Number(document.getElementById('fee-f-year').value || (new Date()).getFullYear());
+  var stat  = document.getElementById('fee-f-status').value;
+  var q     = (document.getElementById('fee-search').value || '').toLowerCase();
+  var names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var now   = new Date();
+
+  // Per-month occupancy/LPG-mode for every unit this year, fetched once
+  // and cached — this is what makes Jan-Unoccupied/Feb-Occupied/
+  // Mar-Unoccupied-again correctly affect WMF/LPG applicability month
+  // by month, instead of one blanket flag applied to the whole year.
+  if (feesOccupancyByYear[year] === undefined) {
+    feesOccupancyByYear[year] = {}; // placeholder marks "already requested" — avoids duplicate fetches while in flight
+    google.script.run.withSuccessHandler(function(r) {
+      feesOccupancyByYear[year] = (r && r.success && r.data) ? r.data : {};
+      feesRender(); // re-render now that the real per-month data has arrived
+    }).withFailureHandler(function() { feesRender(); })
+      .doPost_internal('occupancy.getYearViewForAll', { year: year });
+  }
+  var occMap = feesOccupancyByYear[year];
+  function feesEffOcc(unitId) { var arr = occMap[String(unitId).toUpperCase()]; return arr; } // arr[m-1] = {occupancy, lpg_mode} for month m
+  // Stats are pinned to the LATEST month that has recorded data for this
+  // year + fee type (so a Jan-only import shows Jan stats, not empty Dec).
+  // Fallback: current month for the current year, December for past years.
+  var statM = 0, mCounts = [0,0,0,0,0,0,0,0,0,0,0,0];
+  for (var pk in feesPayMap) {
+    var pp2 = pk.split('|');                     // UNIT|type|YYYY-MM
+    if (pp2[1] !== feesType) continue;
+    if (String(pp2[2]).slice(0, 4) !== String(year)) continue;
+    var mm2 = parseInt(String(pp2[2]).slice(5, 7), 10);
+    if (mm2 >= 1 && mm2 <= 12) mCounts[mm2 - 1]++;
+  }
+  // Use the month with the MOST recorded payments — that is the month the
+  // imported statement actually covers (a lump payment split into later
+  // months must not drag the stats to December).
+  var best = 0;
+  for (var bm = 0; bm < 12; bm++) {
+    if (mCounts[bm] > best) { best = mCounts[bm]; statM = bm + 1; }
+  }
+  if (!statM) statM = (year === now.getFullYear()) ? (now.getMonth() + 1) : 12;
+
+  var te = document.getElementById('fees-title');
+  if (te) te.textContent = '📋 ' + feesType + ' — ' + year + ' (Jan–Dec)';
+
+  var paid = 0, pending = 0, collectedYear = 0;
+  var monthTotals = [0,0,0,0,0,0,0,0,0,0,0,0];
+  var monthDefs   = [0,0,0,0,0,0,0,0,0,0,0,0];
+  var rowsHtml = '';
+  var shown = 0;
+
+  for (var i = 0; i < feesUnits.length; i++) {
+    var u  = feesUnits[i];
+    var uk = String(u.unit_id).toUpperCase();
+    var o  = feesOwners[uk];
+    var t  = feesTenants[uk];
+
+    // Per-month summary counts across ALL units (independent of filters).
+    // Unoccupied units do not owe WMF/LPG, so they are never defaulters there —
+    // checked PER MONTH now (a unit can be UO in Jan, occupied in Feb, etc.)
+    var occArrSum = feesEffOcc(u.unit_id);
+    for (var sm = 1; sm <= 12; sm++) {
+      var si = feesPaidInfo(u.unit_id, feesType, year, sm);
+      if (si && si !== 'POLICY') monthTotals[sm-1] += Number(si.amount) || 0;
+      var sumUOm = false;
+      if ((feesType === 'Waste Management' || feesType === 'LPG') && occArrSum && occArrSum[sm-1]) {
+        sumUOm = occArrSum[sm-1].occupancy === 'Unoccupied' || (feesType === 'LPG' && occArrSum[sm-1].lpg_mode !== 'Using');
+      }
+      if (si === null && !sumUOm) monthDefs[sm-1]++;
+    }
+
+    if (q) {
+      function hit(v) { return v && String(v).toLowerCase().indexOf(q) > -1; }
+      if (!(hit(u.unit_id) || (o && (hit(o.name) || hit(o.phone))) || (t && (hit(t.name) || hit(t.phone))))) continue;
+    }
+
+    // Per-month occupancy/LPG data for this unit (falls back gracefully
+    // to the unit's static fields if the batched fetch hasn't landed yet).
+    var occArrRow = feesEffOcc(u.unit_id);
+
+    // Build the 12 month cells + row total; count year-level status for filter
+    var cells = '', rowTotal = 0, rowPendingCount = 0, rowPaidCount = 0, rowUoCount = 0;
+    for (var m = 1; m <= 12; m++) {
+      // Waste Management & LPG are not owed by an Unoccupied unit THAT
+      // MONTH — and LPG specifically also isn't owed in any month the
+      // unit is on its own cylinder or not using LPG at all.
+      var isUO = false;
+      if (feesType === 'Waste Management' || feesType === 'LPG') {
+        var moRow = occArrRow && occArrRow[m-1];
+        var effOcc = moRow ? moRow.occupancy : u.occupancy;
+        var effLpg = moRow ? moRow.lpg_mode  : u.lpg_mode;
+        isUO = effOcc === 'Unoccupied' || (feesType === 'LPG' && effLpg !== 'Using');
+      }
+      var info = feesPaidInfo(u.unit_id, feesType, year, m);
+      if (info === 'POLICY') {
+        cells += '<td class="fee-td"><div class="fee-cell fee-cell-policy" title="' + names[m-1] + ' ' + year + ': paid (2023–25 policy)">Paid</div></td>';
+      } else if (info && info.status === 'UO') {
+        rowUoCount++;
+        cells += '<td class="fee-td"><div class="fee-cell fee-cell-uo" style="cursor:pointer" title="' + names[m-1] + ' ' + year + ': marked Unoccupied — not owed. Click to change." ' +
+          'onclick="feesEditPayment(\'' + feeE(info.payment_id) + '\')">UO</div></td>';
+      } else if (info) {
+        var src = String(info.notes || '').indexOf('BANK:') === 0 ? ' 🏦' : '';
+        rowTotal += Number(info.amount) || 0;
+        rowPaidCount++;
+        cells += '<td class="fee-td"><div class="fee-cell fee-cell-paid" title="' + names[m-1] + ' ' + year + ': ₹' +
+          Math.round(Number(info.amount)).toLocaleString('en-IN') + src + ' — click to see every record behind this amount" ' +
+          'onclick="feesShowCellRecords(\'' + feeE(u.unit_id) + '\',' + year + ',' + m + ')">₹' +
+          Math.round(Number(info.amount)).toLocaleString('en-IN') + '</div></td>';
+      } else if (isUO) {
+        cells += '<td class="fee-td"><div class="fee-cell fee-cell-uo" title="' + names[m-1] + ' ' + year + ': Unoccupied — ' + feesType + ' not applicable">UO</div></td>';
+      } else if (FEES_OBLIGATORY[feesType]) {
+        rowPendingCount++;
+        cells += '<td class="fee-td"><div class="fee-cell fee-cell-pend" title="' + names[m-1] + ' ' + year + ': pending — click to record the payment" ' +
+          'onclick="feesMarkPaid(\'' + feeE(u.unit_id) + '\',' + year + ',' + m + ')">+</div></td>';
+      } else {
+        cells += '<td class="fee-td"><div class="fee-cell" style="color:var(--text-muted);opacity:.5" title="' + names[m-1] + ' ' + year + ': no entry — click to record one" ' +
+          'onclick="feesMarkPaid(\'' + feeE(u.unit_id) + '\',' + year + ',' + m + ')">+</div></td>';
+      }
+      if (m === statM) {
+        if (info !== null && !(info !== 'POLICY' && info.status === 'UO')) paid++;
+        else if (info === null && FEES_OBLIGATORY[feesType] && !isUO) pending++;
+      }
+    }
+    collectedYear += rowTotal;
+
+    if (stat === 'any'     && rowPaidCount === 0)    continue;
+    // Fully Paid requires zero pending AND at least one real payment —
+    // a fully-UO unit paid nothing, so it must not appear here.
+    if (stat === 'paid'    && (rowPendingCount > 0 || rowPaidCount === 0)) continue;
+    if (stat === 'pending' && rowPendingCount === 0) continue;
+    if (stat === 'uo'      && !(isUO || rowUoCount > 0)) continue;
+    shown++;
+
+    rowsHtml += '<tr id="fee-row-' + feeE(uk) + '"' +
+      (feesActiveUnit === uk ? ' class="fee-row-active"' : '') +
+      ' onclick="feesSelectRow(\'' + feeE(uk) + '\')">' +
+      '<td style="color:var(--text-muted);font-weight:600">' + (i + 1) + '</td>' +
+      '<td class="fee-sticky"><strong style="cursor:pointer;color:var(--accent)" onclick="openUnitProfile(\'' + feeE(u.unit_id) + '\')">' + feeE(u.unit_id) + '</strong>' +
+        (function() {
+          var showTenant = FEES_TENANT_PAID[feesType];
+          var name = showTenant ? (t && t.name) : (o && o.name);
+          if (!name && showTenant && o && o.name) name = o.name + ' (owner)'; // no resident on file — fall back, clearly labelled
+          if (!name) return '';
+          return '<div style="font-size:10.5px;color:var(--text-muted);max-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + feeE(name) + '">' + feeE(name) + '</div>';
+        })() +
+      '</td>' +
+      cells +
+      '<td style="text-align:right;font-weight:800;white-space:nowrap">' + (rowTotal ? '₹' + Math.round(rowTotal).toLocaleString('en-IN') : '—') +
+
+      '</td>' +
+      '</tr>';
+  }
+
+  document.getElementById('fees-stats').innerHTML =
+    '<div class="stat-card green"><div class="stat-label">Paid — ' + names[statM-1] + ' ' + year + '</div><div class="stat-value">' + paid + '</div><div class="stat-sub">of ' + feesUnits.length + ' units</div></div>' +
+    '<div class="stat-card red"><div class="stat-label">Pending — ' + names[statM-1] + '</div><div class="stat-value">' + (FEES_OBLIGATORY[feesType] ? pending : '—') + '</div><div class="stat-sub">' + feesType + '</div></div>' +
+    '<div class="stat-card gold"><div class="stat-label">Collected — ' + year + '</div><div class="stat-value" style="font-size:20px">' + formatRupees(collectedYear) + '</div><div class="stat-sub">' + feesType + ' · full year</div></div>' +
+    '<div class="stat-card info"><div class="stat-label">Collection Rate</div><div class="stat-value">' + (feesUnits.length ? Math.round(paid / feesUnits.length * 100) : 0) + '%</div><div class="stat-sub">' + names[statM-1] + ' ' + year + '</div></div>';
+
+  var ce = document.getElementById('fees-count');
+  if (ce) ce.textContent = shown + ' unit' + (shown !== 1 ? 's' : '');
+
+  var head = '<th>#</th><th class="fee-sticky">Unit / ' + (FEES_TENANT_PAID[feesType] ? 'Tenant' : 'Owner') + '</th>';
+  for (var hm = 0; hm < 12; hm++) head += '<th style="text-align:center">' + names[hm] + '</th>';
+  head += '<th style="text-align:right">Total ' + year + '</th>';
+
+  // Summary rows (all 136 units, regardless of filters): collected + defaulters per month
+  var yearGrand = 0;
+  for (var g = 0; g < 12; g++) yearGrand += monthTotals[g];
+  var sumRow = '<tr class="fee-sum"><th></th><th class="fee-sticky" style="text-align:right;font-size:10.5px;">TOTAL ›››</th>';
+  for (var st2 = 0; st2 < 12; st2++) {
+    sumRow += '<th style="text-align:center;font-size:10px;white-space:nowrap;">' +
+      (monthTotals[st2] ? '₹' + Math.round(monthTotals[st2]).toLocaleString('en-IN') : '—') + '</th>';
+  }
+  sumRow += '<th style="text-align:right;font-size:10.5px;white-space:nowrap;">₹' + Math.round(yearGrand).toLocaleString('en-IN') + '</th></tr>';
+  var defRow = '';
+  if (FEES_OBLIGATORY[feesType]) {
+    defRow = '<tr class="fee-sum"><th></th><th class="fee-sticky" style="text-align:right;font-size:10.5px;color:var(--c-rejected-fg);">DEFAULTERS ›››</th>';
+    for (var sd = 0; sd < 12; sd++) {
+      defRow += '<th style="text-align:center;font-size:10.5px;color:' +
+        (monthDefs[sd] ? 'var(--c-rejected-fg)' : 'var(--c-verified-fg)') + ';">' + monthDefs[sd] + '</th>';
+    }
+    defRow += '<th></th></tr>';
+  }
+
+  document.getElementById('fees-table').innerHTML = !shown
+    ? emptyHtml('💳','No units match the current filters.')
+    : '<div class="table-wrap" style="max-height:70vh;overflow:auto"><table><thead><tr>' +
+      head + '</tr>' + sumRow + defRow + '</thead><tbody>' + rowsHtml + '</tbody></table></div>';
+}
+
+// Select a row: highlight persists until a different row is selected.
+function feesSelectRow(uk) {
+  if (feesActiveUnit === uk) return;
+  var prev = document.getElementById('fee-row-' + feesActiveUnit);
+  if (prev) prev.className = '';
+  feesActiveUnit = uk;
+  var cur = document.getElementById('fee-row-' + uk);
+  if (cur) cur.className = 'fee-row-active';
+}
+
+// ── Mark a pending month as paid (manual, goes into the central ledger) ──
+function feesMarkPaid(unitId, year, month) {
+  feesSelectRow(String(unitId).toUpperCase());
+  var def = feesType === 'Maintenance' ? '2000'
+          : feesType === 'Waste Management' ? '170'
+          : feesType === 'Caution Deposit' ? '1600' : '';
+
+  // LPG: pull the amount straight from the meter reading (LPG Readings page)
+  // if one was recorded for this unit + month, instead of guessing an amount.
+  if (feesType === 'LPG') {
+    google.script.run.withSuccessHandler(function(r) {
+      var mo = (r && r.success && r.data) ? r.data : {};
+      var rd = mo[String(unitId).toUpperCase()];
+      _feesOpenMarkPaidModal(unitId, year, month, rd ? String(Math.round(Number(rd.amount))) : def,
+        rd ? ('Meter reading: ' + rd.previous_reading + ' \u2192 ' + rd.current_reading + ' (' + rd.consumed + ' NM\u00b3)') : '');
+    }).withFailureHandler(function() { _feesOpenMarkPaidModal(unitId, year, month, def, ''); })
+      .doPost_internal('lpg.getMonth', { year: year, month: month });
+    return;
+  }
+  _feesOpenMarkPaidModal(unitId, year, month, def, '');
+}
+
+function _feesOpenMarkPaidModal(unitId, year, month, def, hint) {
+  var names = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  openModal(
+    '<div class="modal-header"><span class="modal-title">✓ Mark Paid — ' + feeE(unitId) + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+      '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">' +
+        feesType + ' · <strong>' + names[month-1] + ' ' + year + '</strong> — records a manual Verified payment in the central ledger.' +
+      '</div>' +
+      '<div class="form-group"><label>Amount (₹) *</label><input id="fmp-amount" type="number" value="' + def + '">' +
+        (hint ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">📟 ' + hint + ' — from LPG Meter Readings</div>' : '') +
+      '</div>' +
+      '<div class="form-group"><label>Notes (optional)</label><input id="fmp-notes" placeholder="e.g. Cash received on 05-Jul"></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+        '<button class="btn btn-accent" onclick="feesSubmitMarkPaid(\'' + feeE(unitId) + '\',' + year + ',' + month + ')">💾 Record Payment</button>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function feesSubmitMarkPaid(unitId, year, month) {
+  var amt = (document.getElementById('fmp-amount').value || '').trim();
+  var nts = (document.getElementById('fmp-notes').value || '').trim();
+  if (!amt || isNaN(Number(amt)) || Number(amt) <= 0) { showToast('Enter a valid amount', 'error'); return; }
+
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (!r || !r.success || !r.data || !r.data.payment_id) {
+        showToast((r && r.error) || 'Failed to record', 'error'); return;
+      }
+      showToast('Payment recorded!', 'success');
+      closeModalForce();
+      loadPayments();
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('payments.submit', {
+      unit_id:      unitId,
+      tenant_id:    '',
+      payment_type: feesType,
+      amount:       Number(amt),
+      month:        feesMonthKey(year, month),
+      notes:        nts,
+      status:       'Verified',
+      reviewed_by:  'Manager'
+    });
+}
+
+
+// ═══ Cell Records Inspector — every record behind one fees cell ═══
+// A month's displayed amount can be the SUM of several records (a
+// manual allocation plus a residual from the old tools, a double
+// entry, etc.). This lists each one with its origin, and offers
+// per-record edit and delete — the surgical broom.
+function feesRecordOrigin(notes) {
+  var n = String(notes || '');
+  if (n.indexOf('PARKED-ALLOC') === 0) return { label: '📅 Manual allocation (parked funds)', color: '#10b981' };
+  if (/^BANK:\S+\s+\(split/.test(n))   return { label: '✂️ Legacy split (old tool)', color: '#f59e0b' };
+  if (n.indexOf('BANK:') === 0)          return { label: '🏦 Auto-posted from bank statement', color: '#3b82f6' };
+  if (/manual redistribution/i.test(n))  return { label: '🔀 Legacy redistribution (old tool)', color: '#f59e0b' };
+  return { label: '✍️ Manual entry', color: '#64748b' };
+}
+
+function feesShowCellRecords(unitId, year, month) {
+  var unit = String(unitId).toUpperCase();
+  var mk = year + '-' + (month < 10 ? '0' + month : month);
+  var records = [];
+  for (var i = 0; i < paysAll.length; i++) {
+    var p = paysAll[i];
+    if (String(p.unit_id).toUpperCase() !== unit) continue;
+    if (p.payment_type !== feesType) continue;
+    if (String(p.month) !== mk) continue;
+    records.push(p);
+  }
+  if (!records.length) return;
+  if (records.length === 1 && String(records[0].status) !== 'Rejected') {
+    // Single record: also show the inspector — the origin line is the
+    // whole point; edit is one more click away.
+  }
+  feesSelectRow(unit);
+  var names = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var total = 0;
+  records.forEach(function(p) { if (p.status !== 'Rejected') total += Number(p.amount) || 0; });
+
+  var h = '<div class="modal-header"><span class="modal-title">🔎 ' + feeE(unit) + ' · ' + feeE(feesType) + ' · ' + names[month-1] + ' ' + year + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">' +
+    '<div style="font-size:12.5px;margin-bottom:10px;">' + records.length + ' record(s) behind this cell · counted total: <strong>' + formatRupees(total) + '</strong>' +
+    (records.length > 1 ? ' <span style="color:#f59e0b;font-weight:700;">— multiple records stack in this month</span>' : '') + '</div>';
+
+  records.forEach(function(p) {
+    var o = feesRecordOrigin(p.notes);
+    h += '<div style="border:1px solid var(--border,rgba(128,128,128,.3));border-radius:8px;padding:10px 12px;margin-bottom:8px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<strong style="font-size:14px;">' + formatRupees(Number(p.amount) || 0) + '</strong>' +
+        '<span class="pill" style="background:' + o.color + '22;color:' + o.color + ';font-weight:700;font-size:10.5px;">' + o.label + '</span>' +
+        '<span class="pill" style="font-size:10.5px;font-weight:700;">' + feeE(p.status) + '</span>' +
+        '<span style="margin-left:auto;"></span>' +
+        '<button class="btn btn-xs btn-outline" onclick="feesEditPayment(\'' + feeE(p.payment_id) + '\')">✏️ Edit</button>' +
+        '<button class="btn btn-xs btn-outline" style="color:var(--c-rejected-fg);" onclick="feesDeleteRecord(\'' + feeE(p.payment_id) + '\')">🗑 Delete</button>' +
+      '</div>' +
+      (p.notes ? '<div style="font-size:11px;color:var(--text-muted);margin-top:5px;word-break:break-all;">' + feeE(p.notes) + '</div>' : '') +
+    '</div>';
+  });
+  h += '<div style="font-size:11.5px;color:var(--text-muted);">The grid shows the SUM of all non-Rejected records here. Residuals from the old split/redistribution tools carry the ⚠️-orange origins — deleting them (with the button above) reconciles the cell.</div>' +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Close</button></div></div>';
+  openModal(h);
+}
+
+function feesDeleteRecord(paymentId) {
+  var p = null;
+  for (var i = 0; i < paysAll.length; i++) if (paysAll[i].payment_id === paymentId) p = paysAll[i];
+  if (!p) return;
+  var o = feesRecordOrigin(p.notes);
+  var ok = confirm('Delete exactly this ONE record?\n\n' +
+    '  ' + p.unit_id + ' · ' + p.payment_type + ' · ' + p.month + '\n' +
+    '  ₹' + Number(p.amount).toLocaleString('en-IN') + ' · ' + o.label.replace(/^[^ ]+ /, '') + '\n\nNothing else will be touched.');
+  if (!ok) return;
+  doPostWithHistoryConfirm('payments.deleteRecord', { payment_id: paymentId },
+    function(r) {
+      if (r && r.success) {
+        showToast('Deleted ' + r.data.deleted.unit_id + ' ' + r.data.deleted.month + ' ₹' + Number(r.data.deleted.amount).toLocaleString('en-IN'), 'success');
+        closeModalForce();
+        loadPayments();
+      } else showToast((r && r.error) || 'Failed', 'error');
+    },
+    function(e) { showToast('Error: ' + e, 'error'); });
+}
+
+function feesEditPayment(paymentId) {
+  var p = null;
+  for (var i = 0; i < paysAll.length; i++) {
+    if (paysAll[i].payment_id === paymentId) { p = paysAll[i]; break; }
+  }
+  if (!p) return;
+  feesSelectRow(String(p.unit_id).toUpperCase());
+
+  var types = ['Maintenance','Waste Management','LPG','Caution Deposit','Party Hall Rental','Miscellaneous'];
+  var typeOpts = '';
+  for (var i = 0; i < types.length; i++) {
+    typeOpts += '<option' + (types[i] === p.payment_type ? ' selected' : '') + '>' + types[i] + '</option>';
+  }
+  var statuses = ['Verified','Pending','UO','Rejected'];
+  var stOpts = '';
+  for (var i = 0; i < statuses.length; i++) {
+    stOpts += '<option' + (statuses[i] === p.status ? ' selected' : '') + '>' + statuses[i] + '</option>';
+  }
+
+  openModal(
+    '<div class="modal-header"><span class="modal-title">✏️ Edit Payment — ' + feeE(p.unit_id) + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+      (String(p.notes||'').indexOf('BANK:') === 0
+        ? '<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:12px;margin-bottom:14px;">🏦 Posted automatically from a bank statement transaction. Correct the type, month or amount below if the automatic allocation was wrong.</div>'
+        : '') +
+      '<div class="form-row">' +
+        '<div class="form-group"><label>Payment Type</label><select id="pe-type">' + typeOpts + '</select></div>' +
+        '<div class="form-group"><label>For Month</label><input id="pe-month" type="month" value="' + feeE(p.month || '') + '"></div>' +
+      '</div>' +
+      '<div class="form-row">' +
+        '<div class="form-group"><label>Amount (₹)</label><input id="pe-amount" type="number" value="' + feeE(p.amount || '') + '"></div>' +
+        '<div class="form-group"><label>Status</label><select id="pe-status">' + stOpts + '</select></div>' +
+      '</div>' +
+      '<div class="form-group"><label>Unit ID</label><input id="pe-unit" value="' + feeE(p.unit_id || '') + '" style="text-transform:uppercase"></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+        '<button class="btn btn-accent" onclick="feesSaveEdit(\'' + feeE(paymentId) + '\')">💾 Save</button>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function feesSaveEdit(paymentId) {
+  function gv(id) { var e = document.getElementById(id); return e ? e.value.trim() : ''; }
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (r && r.success) { showToast('Payment updated', 'success'); closeModalForce(); loadPayments(); }
+      else { showToast((r && r.error) || 'Failed', 'error'); }
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('payments.update', {
+      payment_id:   paymentId,
+      payment_type: gv('pe-type'),
+      month:        gv('pe-month'),
+      amount:       gv('pe-amount'),
+      status:       gv('pe-status'),
+      unit_id:      gv('pe-unit'),
+      reviewed_by:  'Manager'
+    });
+}
+
+function feeE(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+</script>

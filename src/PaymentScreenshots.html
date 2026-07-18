@@ -1,0 +1,243 @@
+<!-- PaymentScreenshots.html — payment-confirmation screenshots sent by
+     residents over WhatsApp, OCR'd from a Drive folder, reviewed here,
+     and matched to unmatched ledger transactions via the UPI reference
+     (UTR) that appears in both the screenshot and the bank narration. -->
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">📸 Payment Screenshots</h1>
+    <p class="page-subtitle">The last-resort identifier — residents' payment confirmations, text-extracted automatically and matched to unmatched ledger transactions by UPI reference</p>
+  </div>
+  <button class="btn btn-outline btn-sm" onclick="ssOpenFolder()">🔗 Open Drive Folder</button>
+  <button class="btn btn-accent btn-sm" id="ss-scan-btn" onclick="ssScan()">📷 Scan for New Screenshots</button>
+  <button class="btn btn-outline btn-sm" onclick="ssLoad(true)">🔄 Refresh</button>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div id="ss-status" style="margin-bottom:10px;"></div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+      <input id="ss-search" type="text" placeholder="🔍 Search by unit, name, amount, UTR…" oninput="ssRender()" style="flex:1;min-width:220px;padding:8px 12px;font-size:13px;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:0;font-weight:400;">
+        <input type="checkbox" id="ss-only-open" onchange="ssRender()"> Only unmatched
+      </label>
+      <span id="ss-count" style="font-size:12px;color:var(--text-muted);white-space:nowrap;"></span>
+    </div>
+    <div id="ss-body"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<script>
+var ssData = null;
+
+function ssOpenFolder() {
+  var url = (ssData && ssData.folderUrl) ? ssData.folderUrl : '';
+  if (!url) { showToast('Set the screenshots folder URL in Settings → 📸 Payment Screenshots first', 'error'); return; }
+  window.open(url, '_blank');
+}
+
+function ssShowStatus(msg, type) {
+  var el = document.getElementById('ss-status');
+  if (!el) return;
+  if (!msg) { el.innerHTML = ''; return; }
+  var bg = type === 'success' ? 'var(--c-verified-bg)' : type === 'error' ? 'var(--c-rejected-bg)' : 'var(--bg-surface2)';
+  var fg = type === 'success' ? 'var(--c-verified-fg)' : type === 'error' ? 'var(--c-rejected-fg)' : 'var(--text-secondary)';
+  el.innerHTML = '<div style="background:' + bg + ';color:' + fg + ';padding:8px 12px;border-radius:6px;font-size:12.5px;">' + msg + '</div>';
+}
+
+function ssScan() {
+  var btn = document.getElementById('ss-scan-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Scanning…'; }
+  ssShowStatus('⏳ Reading the Drive folder and extracting text from new screenshots — a few seconds per image…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    if (btn) { btn.disabled = false; btn.textContent = '📷 Scan for New Screenshots'; }
+    if (!r || !r.success) { ssShowStatus('❌ ' + (r ? r.error : 'Failed'), 'error'); return; }
+    var d = r.data;
+    var msg = '✓ ' + d.processed + ' new screenshot(s) processed · ' + d.alreadyKnown + ' already known';
+    if (d.remaining) msg += ' · ' + d.remaining + ' still waiting — run Scan again to continue';
+    if (d.errors && d.errors.length) msg += ' · ⚠️ ' + d.errors.length + ' failed: ' + d.errors.join('; ');
+    ssShowStatus(msg, d.errors && d.errors.length ? 'error' : 'success');
+    ssLoad(true);
+  }).withFailureHandler(function(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '📷 Scan for New Screenshots'; }
+    ssShowStatus('❌ Error: ' + e, 'error');
+  }).doPost_internal('screenshots.scan', {});
+}
+
+function ssLoad(isManualRefresh) {
+  var body = document.getElementById('ss-body');
+  if (body && (isManualRefresh || !ssData)) body.innerHTML = loadingHtml('Loading screenshots…');
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:14px;">Error: ' + formsE(r ? r.error : 'failed') + '</div>'; return; }
+    ssData = r.data;
+    ssRender();
+  }).withFailureHandler(function(e) {
+    if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:14px;">Error: ' + formsE(e) + '</div>';
+  }).doPost_internal('screenshots.list', {});
+}
+
+function ssStatusPill(s) {
+  if (s.matched_txn_id) return '<span class="pill" style="background:rgba(16,185,129,.15);color:#10b981;font-weight:700;font-size:11px;">✓ Matched</span>';
+  if (s.suggestions && s.suggestions.length && s.suggestions[0].confidence === 'exact') return '<span class="pill" style="background:rgba(245,158,11,.15);color:#f59e0b;font-weight:700;font-size:11px;">⚡ Exact UTR found</span>';
+  if (s.suggestions && s.suggestions.length) return '<span class="pill" style="background:rgba(59,130,246,.15);color:#3b82f6;font-weight:700;font-size:11px;">' + s.suggestions.length + ' candidate(s)</span>';
+  return '<span class="pill" style="background:rgba(100,116,139,.15);color:#64748b;font-weight:700;font-size:11px;">No match yet</span>';
+}
+
+function ssRender() {
+  var body = document.getElementById('ss-body');
+  var countEl = document.getElementById('ss-count');
+  if (!body || !ssData) return;
+
+  var q = String((document.getElementById('ss-search') || {}).value || '').toLowerCase().trim();
+  var onlyOpen = !!(document.getElementById('ss-only-open') || {}).checked;
+  var shots = ssData.shots;
+  if (onlyOpen) shots = shots.filter(function(s) { return !s.matched_txn_id; });
+  if (q) shots = shots.filter(function(s) {
+    return (s.unit_hint + ' ' + s.payer_name + ' ' + s.bank + ' ' + s.amount + ' ' + s.utr + ' ' + s.narration + ' ' + s.notes + ' ' + s.file_name).toLowerCase().indexOf(q) > -1;
+  });
+
+  if (countEl) countEl.textContent = shots.length + ' of ' + ssData.count + ' screenshot' + (ssData.count === 1 ? '' : 's');
+
+  if (!ssData.count) {
+    body.innerHTML = '<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:14px 16px;font-size:13px;line-height:1.7;">' +
+      '<strong>No screenshots yet.</strong> One-time setup:<br>' +
+      '1. Create a Drive folder for payment screenshots and paste its URL in <strong>Settings → 📸 Payment Screenshots</strong>.<br>' +
+      '2. Upload residents\' confirmation screenshots there — <strong>name each file with the flat</strong> (e.g. <code>A101_15Jan.jpg</code>), that\'s how the unit is captured.<br>' +
+      '3. Come back and hit 📷 Scan for New Screenshots.</div>';
+    return;
+  }
+  if (!shots.length) { body.innerHTML = '<div style="color:var(--text-muted);padding:14px;">Nothing matches the current filter.</div>'; return; }
+
+  var h = '<div class="table-wrap" style="max-height:70vh;overflow:auto;"><table class="forms-table" style="min-width:1080px;"><thead><tr>' +
+    '<th style="width:36px;">#</th><th>📷</th><th>Unit</th><th>Date</th><th>Narration</th><th>Name (Bank)</th><th>Amount</th><th>Notes</th><th>Txn ID / UTR</th><th>Match</th><th style="width:88px;">Actions</th>' +
+    '</tr></thead><tbody>';
+  shots.forEach(function(s, i) {
+    var unitCell = s.unit_hint
+      ? '<span style="cursor:pointer;text-decoration:underline;color:var(--accent);font-weight:700;" onclick="openUnitProfile(\'' + formsE(s.unit_hint) + '\')">' + formsE(s.unit_hint) + '</span>'
+      : '<span style="color:var(--c-rejected-fg);font-size:11px;" title="Name the file with the flat, or set the unit via ✏️ edit">missing</span>';
+    var matchCell = s.matched_txn_id
+      ? ssStatusPill(s)
+      : ssStatusPill(s) + (s.suggestions.length ? ' <button class="btn btn-xs btn-accent" onclick="ssOpenMatch(\'' + s.shot_id + '\')">🔗 Match</button>' : '');
+    h += '<tr>' +
+      '<td style="font-weight:700;color:var(--text-muted);">' + (i + 1) + '</td>' +
+      '<td><a href="' + formsE(s.file_url) + '" target="_blank" rel="noopener" title="Open the original screenshot" style="text-decoration:none;font-size:16px;">🖼️</a></td>' +
+      '<td>' + unitCell + '</td>' +
+      '<td style="white-space:nowrap;">' + formsE(s.date_text || '—') + '</td>' +
+      '<td style="font-size:12px;max-width:220px;">' + formsE(s.narration || '—') + '</td>' +
+      '<td>' + formsE(s.payer_name || '—') + (s.bank ? ' <span style="font-size:11px;color:var(--text-muted);">(' + formsE(s.bank) + ')</span>' : '') + '</td>' +
+      '<td style="font-weight:700;white-space:nowrap;">' + (s.amount ? formatRupees(s.amount) : '—') + '</td>' +
+      '<td style="font-size:12px;max-width:160px;">' + formsE(s.notes || '—') + '</td>' +
+      '<td style="font-family:monospace;font-size:11.5px;">' + formsE(s.utr || '—') + (s.duplicate_utr ? ' <span title="Another screenshot carries this same UTR — possible duplicate submission">⚠️</span>' : '') + '</td>' +
+      '<td>' + matchCell + '</td>' +
+      '<td style="white-space:nowrap;"><span class="cm-act">' +
+        '<button class="btn btn-xs btn-outline" title="Edit extracted fields" onclick="ssOpenEdit(\'' + s.shot_id + '\')">✏️</button> ' +
+        '<button class="btn btn-xs btn-outline" title="Delete this record (the image stays in Drive)" style="color:var(--c-rejected-fg);" onclick="ssDelete(\'' + s.shot_id + '\',\'' + formsE(s.file_name) + '\')">🗑</button>' +
+      '</span></td>' +
+    '</tr>';
+  });
+  h += '</tbody></table></div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-top:8px;">⚡ Exact UTR found = the screenshot\'s UPI reference appears verbatim in a ledger transaction\'s narration — a near-certain match. Deleting a record here never touches the image in Drive.</div>';
+  body.innerHTML = h;
+}
+
+function ssFind(id) {
+  var m = null;
+  ssData.shots.forEach(function(s) { if (s.shot_id === id) m = s; });
+  return m;
+}
+
+function ssOpenEdit(id) {
+  var s = ssFind(id);
+  if (!s) return;
+  function fg(label, fid, val, ph) {
+    return '<div class="form-group"><label>' + label + '</label><input id="' + fid + '" type="text" value="' + formsE(val || '') + '" placeholder="' + (ph || '') + '" style="width:100%;"></div>';
+  }
+  openModal('<div class="modal-header"><span class="modal-title">✏️ Edit — ' + formsE(s.file_name) + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+    '<div style="font-size:12px;margin-bottom:10px;"><a href="' + formsE(s.file_url) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;">🖼️ Open the original screenshot</a> — compare while correcting.</div>' +
+    fg('Unit', 'ssf-unit', s.unit_hint, 'e.g. A101') +
+    fg('Date', 'ssf-date', s.date_text, 'as shown on the screenshot') +
+    fg('Narration', 'ssf-narr', s.narration, '') +
+    fg('Payer Name', 'ssf-payer', s.payer_name, '') +
+    fg('Bank', 'ssf-bank', s.bank, '') +
+    fg('Amount (₹)', 'ssf-amount', s.amount || '', '') +
+    fg('Notes', 'ssf-notes', s.notes, 'anything worth remembering') +
+    fg('Transaction ID / UTR', 'ssf-utr', s.utr, '12-digit UPI reference') +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+    '<button class="btn btn-accent" onclick="ssSaveEdit(\'' + id + '\')">💾 Save</button></div></div>');
+}
+
+function ssSaveEdit(id) {
+  function gv(fid) { var e = document.getElementById(fid); return e ? e.value.trim() : ''; }
+  var d = { shot_id: id, unit_hint: gv('ssf-unit'), date_text: gv('ssf-date'), narration: gv('ssf-narr'),
+            payer_name: gv('ssf-payer'), bank: gv('ssf-bank'), amount: Number(gv('ssf-amount')) || 0,
+            notes: gv('ssf-notes'), utr: gv('ssf-utr') };
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Saved', 'success'); closeModalForce(); ssLoad(false); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('screenshots.update', d);
+}
+
+function ssDelete(id, name) {
+  if (!confirm('Delete the record for "' + name + '"?\n\nThe image itself stays in Drive — only the extracted row is removed. Scanning again would re-import it.')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Deleted', 'success'); ssLoad(true); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('screenshots.delete', { shot_id: id });
+}
+
+function ssOpenMatch(id) {
+  var s = ssFind(id);
+  if (!s || !s.suggestions.length) return;
+  var h = '<div class="modal-header"><span class="modal-title">🔗 Match — ' + formsE(s.file_name) + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">' +
+    '<div style="font-size:12.5px;margin-bottom:10px;">Screenshot: <strong>' + (s.amount ? formatRupees(s.amount) : '?') + '</strong>' +
+    (s.utr ? ' · UTR <code>' + formsE(s.utr) + '</code>' : '') + (s.payer_name ? ' · ' + formsE(s.payer_name) : '') +
+    ' · <a href="' + formsE(s.file_url) + '" target="_blank" rel="noopener" style="color:var(--accent);">🖼️ view</a></div>' +
+    '<div style="font-weight:700;font-size:12.5px;margin-bottom:6px;">Choose the ledger transaction:</div>';
+  s.suggestions.forEach(function(g, i) {
+    var conf = g.confidence === 'exact'
+      ? '<span class="pill" style="background:rgba(16,185,129,.15);color:#10b981;font-weight:700;font-size:10px;">⚡ exact UTR</span>'
+      : '<span class="pill" style="background:rgba(59,130,246,.15);color:#3b82f6;font-weight:700;font-size:10px;">same amount</span>';
+    var acct = g.account === '2' ? ' <span style="font-size:10px;color:#f59e0b;">🔥 IOB LPG</span>' : '';
+    h += '<label style="display:block;border:1px solid var(--border,rgba(128,128,128,.3));border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer;font-size:12px;">' +
+      '<input type="radio" name="ssm-txn" value="' + i + '"' + (i === 0 ? ' checked' : '') + ' style="margin-right:8px;">' +
+      conf + acct + ' <strong>' + formsE(g.date) + '</strong> · ' + formatRupees(g.amount) +
+      (g.matched ? ' · <span style="color:#f59e0b;">already matched</span>' : ' · unmatched') +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;word-break:break-all;">' + formsE(g.narration) + '</div></label>';
+  });
+  h += '<div class="form-group" style="margin-top:10px;"><label>Unit to match</label>' +
+    '<input id="ssm-unit" type="text" value="' + formsE(s.unit_hint || '') + '" placeholder="e.g. A101" style="width:100%;"></div>' +
+    '<div class="form-group"><label>Payment Type</label><select id="ssm-type" style="width:100%;">' +
+    '<option value="">— choose —</option><option value="Maintenance">Maintenance</option><option value="Waste Management">Waste Management</option>' +
+    '<option value="LPG">LPG</option><option value="Caution Deposit">Caution Deposit</option><option value="Party Hall Rental">Party Hall Rental</option><option value="Miscellaneous">Miscellaneous</option></select></div>' +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+    '<button class="btn btn-accent" onclick="ssDoMatch(\'' + id + '\')">🔗 Match &amp; Post</button></div></div>';
+  openModal(h);
+}
+
+function ssDoMatch(id) {
+  var s = ssFind(id);
+  if (!s) return;
+  var sel = document.querySelector('input[name="ssm-txn"]:checked');
+  if (!sel) { showToast('Choose a transaction', 'error'); return; }
+  var g = s.suggestions[Number(sel.value)];
+  var unit = (document.getElementById('ssm-unit') || {}).value || '';
+  var ptype = (document.getElementById('ssm-type') || {}).value || '';
+  if (!unit.trim()) { showToast('Enter the unit to match', 'error'); return; }
+  if (!ptype) { showToast('Choose the payment type', 'error'); return; }
+  doPostWithHistoryConfirm('screenshots.link',
+    { shot_id: id, txn_id: g.txn_id, account: g.account, unit_id: unit.trim().toUpperCase(),
+      payer_name: s.payer_name, payment_type: ptype },
+    function(r) {
+      if (r && r.success) { showToast('Matched and posted through the ledger pipeline', 'success'); closeModalForce(); ssLoad(true); }
+      else showToast((r && r.error) || 'Failed', 'error');
+    });
+}
+
+function screenshotsPageInit() { ssLoad(); }
+</script>
+

@@ -1,0 +1,1609 @@
+<!-- BankStatement.html -->
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">🏦 Transaction Ledger</h1>
+    <p class="page-subtitle">Import your bank statement — money received (credit) is matched to residents, money paid out (debit) is classified by expense category</p>
+    <div style="display:flex;gap:6px;margin-top:8px;">
+      <button class="btn btn-sm" id="bank-acct-tab-1" onclick="bankSwitchAccount('1')">🏦 Main IOB Account</button>
+      <button class="btn btn-sm btn-outline" id="bank-acct-tab-2" onclick="bankSwitchAccount('2')" title="The older account previously used for LPG collections — historical transactions, occasional mistaken payments, and ongoing bank interest">🔥 IOB LPG Account</button>
+    </div>
+  </div>
+  <button class="btn btn-outline btn-sm" onclick="bankRunRematch()">🔄 Re-run Matching</button>
+  <button class="btn btn-outline btn-sm" onclick="bankAutoCategorize()" title="Checks your explicit patterns (Settings page) first, then learns from expense categories you've already set — applying the matching category to any payment sharing that pattern or narration signature.">🏷️ Auto-Categorize Expenses</button>
+  <button class="btn btn-outline btn-sm" onclick="bankReconcile()" title="Month-end check: OXYGEN totals vs the bank's own running balance">🔍 Reconcile Balances</button>
+</div>
+
+<div id="bank-account-banner" style="display:none;background:rgba(245,158,11,.15);border:1px solid #f59e0b;color:#f59e0b;border-radius:8px;padding:8px 14px;margin-bottom:14px;font-size:12.5px;font-weight:700;">
+  🔥 You are viewing the IOB LPG Account — a different, largely dormant account from the main one.
+</div>
+
+<div class="stats-grid" id="bank-stats-grid">
+  <div class="loading"><div class="spinner"></div></div>
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <div class="card-header"><span class="card-title" id="bank-import-title">📤 Import Bank Statement — Main IOB Account</span></div>
+  <div class="card-body">
+
+    <div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;font-size:13px;">
+      <strong>How it works:</strong> Select your bank statement (XLS or CSV) and click Import.
+      Names are extracted from the Narration column (UPI/IMPS/NEFT) and matched to your Owners and Tenants.
+      Re-importing the same file is safe — duplicates are skipped automatically.
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+      <div style="flex:1;min-width:220px;">
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">Bank Statement File</label>
+        <input type="file" id="bank-file-input" accept=".xls,.xlsx,.csv"
+          style="display:block;width:100%;padding:8px 10px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);font-size:13px;font-family:var(--font-ui);">
+      </div>
+      <button class="btn btn-accent" id="bank-import-btn" onclick="bankDoImport()" style="flex-shrink:0;height:38px;">
+        📥 Import Statement
+      </button>
+    </div>
+
+    <div id="bank-import-status"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">📋 Transaction Ledger</span>
+    <span id="bank-txn-count" style="font-size:12px;color:var(--text-muted);"></span>
+  </div>
+  <div class="card-body" style="padding:0 0 8px;">
+    <div class="ledger-tabs" style="display:flex;gap:0;border-bottom:2px solid var(--border);padding:0 16px;margin-bottom:4px;">
+      <button id="bank-tab-credit" class="ledger-tab ledger-tab-active" onclick="bankSetDir('credit')">💰 Money Received <span style="opacity:.6">(Credit)</span></button>
+      <button id="bank-tab-debit" class="ledger-tab" onclick="bankSetDir('debit')">💸 Payments Made <span style="opacity:.6">(Debit)</span></button>
+    </div>
+    <div class="filters-row" style="padding:14px 16px 0;">
+      <div class="search-bar">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="bank-q" placeholder="Name, unit, narration…" oninput="bankFilter()">
+      </div>
+      <select id="bank-f-match" onchange="bankFilter()">
+        <option value="">All Matches</option>
+        <option value="owner">Owner</option>
+        <option value="tenant">Tenant</option>
+        <option value="unmatched">Unmatched</option>
+      </select>
+      <select id="bank-f-pay" onchange="bankFilter()">
+        <option value="">All Types</option>
+        <option value="Maintenance">Maintenance Fee</option>
+        <option value="Waste Management">Waste Management Fee</option>
+        <option value="LPG">LPG</option>
+        <option value="Caution Deposit">Caution Deposit</option>
+        <option value="Party Hall Rental">Party Hall Rental</option>
+        <option value="Bank Interest">Bank Interest</option>
+        <option value="Miscellaneous">Miscellaneous</option>
+      </select>
+      <select id="bank-f-exp" onchange="bankFilter()" style="display:none">
+        <option value="">All Expense Categories</option>
+      </select>
+      <select id="bank-f-year" onchange="bankFilter()" style="width:auto;padding:7px 11px;font-size:13px;">
+        <option value="">All Years</option>
+      </select>
+      <select id="bank-f-monthsel" onchange="bankFilter()" style="width:auto;padding:7px 11px;font-size:13px;">
+        <option value="">All Months</option>
+        <option value="1">January</option>
+        <option value="2">February</option>
+        <option value="3">March</option>
+        <option value="4">April</option>
+        <option value="5">May</option>
+        <option value="6">June</option>
+        <option value="7">July</option>
+        <option value="8">August</option>
+        <option value="9">September</option>
+        <option value="10">October</option>
+        <option value="11">November</option>
+        <option value="12">December</option>
+      </select>
+      <button class="btn btn-outline btn-sm" onclick="bankClearFilters()">Clear</button>
+    </div>
+    <div id="bank-txn-table" style="margin-top:8px;">
+      <div class="empty-state"><div class="empty-icon">🏦</div><p>Import a bank statement to see transactions.</p></div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .mp-owner     { background:var(--c-resident-bg); color:var(--c-resident-fg); }
+  .mp-tenant    { background:var(--c-occupied-bg); color:var(--c-occupied-fg); }
+  .mp-unmatched { background:var(--c-rejected-bg); color:var(--c-rejected-fg); }
+  .nc { max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--text-secondary); }
+  .ledger-tab { background:none;border:none;border-bottom:3px solid transparent;padding:10px 18px;font-size:14px;font-weight:600;color:var(--text-muted);cursor:pointer;font-family:var(--font-ui);margin-bottom:-2px; }
+  .ledger-tab:hover { color:var(--text-secondary); }
+  .ledger-tab-active { color:var(--accent);border-bottom-color:var(--accent); }
+  #bank-txn-table table { table-layout:fixed;width:100%;border-collapse:collapse; }
+  #bank-txn-table th { position:relative;overflow:hidden; }
+  #bank-txn-table td { word-wrap:break-word;overflow-wrap:break-word;vertical-align:top; }
+  .col-rz { position:absolute;top:0;right:0;bottom:0;width:7px;cursor:col-resize;border-right:2px solid transparent; }
+  .col-rz:hover, .col-rz.dragging { border-right-color:var(--accent); }
+  .bank-narr { font-size:12px;color:var(--text-secondary);white-space:normal;line-height:1.35; }
+  /* Clearer row + column lines (same treatment as the Fees Received page) */
+  #bank-txn-table td, #bank-txn-table th { border:1px solid var(--border-strong, rgba(128,128,128,.35)); }
+  #bank-txn-table tbody tr:hover td { background: rgba(0,200,150,.07); }
+  #bank-txn-table tbody tr.bank-row-active td { background: rgba(0,200,150,.16) !important; }
+  #bank-txn-table tbody tr.bank-row-active td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+
+  /* Click-to-edit cells */
+  .cell-editable { display:flex;align-items:center;gap:6px; }
+  /* Split addendum sub-rows — muted, compact, visually attached to the
+     intact original row above them. Purely informational annotations. */
+  .bank-split-subrow td {
+    background: rgba(100,116,139,.06) !important;
+    padding-top: 3px !important; padding-bottom: 3px !important;
+    border-top: none !important;
+  }
+  .bank-split-subrow td:first-child { box-shadow: inset 3px 0 0 rgba(100,116,139,.35); }
+  .bank-split-subrow:hover td { background: rgba(100,116,139,.12) !important; }
+  .cell-editable .edit-pencil {
+    cursor:pointer;opacity:0;font-size:12px;transition:opacity .12s;flex-shrink:0;
+    filter:grayscale(.3);
+  }
+  tr:hover .edit-pencil { opacity:.55; }
+  .edit-pencil:hover { opacity:1 !important; }
+  .pill-type { font-weight:600;font-size:11px; }
+  .type-dot { display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;vertical-align:middle;flex-shrink:0; }
+  .type-choice { display:flex;align-items:center; }
+  .type-unset { color:var(--text-muted);font-size:12px;font-style:italic; }
+  .note-text {
+    font-size:12px;color:var(--text-secondary);max-width:180px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .add-note-btn {
+    background:none;border:1px dashed var(--border-strong,rgba(255,255,255,.2));
+    color:var(--text-muted);font-size:11px;padding:3px 10px;border-radius:6px;
+    cursor:pointer;opacity:.5;transition:opacity .12s,border-color .12s;font-family:var(--font-ui);
+  }
+  tr:hover .add-note-btn { opacity:1; }
+  .add-note-btn:hover { border-color:var(--accent);color:var(--accent); }
+
+  /* Type picker modal */
+  .txn-context {
+    background:var(--bg-surface2);border-radius:var(--radius-sm,8px);
+    padding:12px 14px;margin-bottom:16px;
+  }
+  .txn-context-narr { font-size:13px;color:var(--text-secondary);line-height:1.4; }
+  .txn-context-amt { font-size:18px;font-weight:700;color:var(--accent);margin-top:6px; }
+  .type-choice-grid { display:grid;grid-template-columns:1fr 1fr;gap:8px; }
+  .type-choice {
+    background:var(--bg-surface2);border:1.5px solid var(--border,rgba(255,255,255,.1));
+    color:var(--text-primary,#fff);border-radius:8px;padding:11px 12px;font-size:13px;
+    cursor:pointer;text-align:left;font-family:var(--font-ui);transition:all .12s;
+  }
+  .type-choice:hover { border-color:var(--accent);background:rgba(0,200,150,.08); }
+  .type-choice-active { border-color:var(--accent);background:rgba(0,200,150,.14);color:var(--accent);font-weight:600; }
+</style>
+
+<script>
+// ── ALL bank page state and functions are namespaced with "bank" prefix
+// ── to avoid collisions. Nothing runs at top level — all triggered by
+// ── bankPageInit() called from Index.html navigateTo().
+
+var bankAllTxns = [];
+// Which bank account this page is currently showing: '1' = the main IOB
+// account, '2' = the older IOB LPG account (historical transactions,
+// mistaken payments, ongoing bank interest). Every bank.* request is
+// stamped with this via bankAcct() so the server operates on the right
+// account's ledger sheet.
+var bankAccount = '1';
+
+function bankAcct(data) { data.account = bankAccount; return data; }
+
+function bankSwitchAccount(acct) {
+  if (acct === bankAccount) return;
+  bankAccount = acct;
+  var t1 = document.getElementById('bank-acct-tab-1');
+  var t2 = document.getElementById('bank-acct-tab-2');
+  if (t1) { t1.className = 'btn btn-sm' + (acct === '1' ? '' : ' btn-outline'); t1.style.background = ''; t1.style.borderColor = ''; t1.style.color = ''; }
+  if (t2) {
+    t2.className = 'btn btn-sm btn-outline';
+    if (acct === '2') { t2.style.background = '#f59e0b'; t2.style.borderColor = '#f59e0b'; t2.style.color = '#1a1200'; }
+    else { t2.style.background = ''; t2.style.borderColor = ''; t2.style.color = ''; }
+  }
+  var banner = document.getElementById('bank-account-banner');
+  if (banner) banner.style.display = acct === '2' ? '' : 'none';
+  var title = document.getElementById('bank-import-title');
+  if (title) title.textContent = acct === '2' ? '📤 Import Bank Statement — IOB LPG Account' : '📤 Import Bank Statement — Main IOB Account';
+  bankAllTxns = [];
+  bankAmountFilter = null; // different account — its amounts are a different universe
+  var grid = document.getElementById('bank-stats-grid');
+  if (grid) grid.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  bankLoadTxns();
+}
+var bankMc      = { owners: null, tenants: null };
+var bankDir     = 'credit';        // which tab is active
+var bankDebitCats = [];            // active debit category names
+
+function bankSetStatus(msg, type) {
+  var el = document.getElementById('bank-import-status');
+  if (!el) return;
+  if (!msg) { el.innerHTML = ''; return; }
+  var bg = type==='success' ? 'var(--c-verified-bg)'  :
+           type==='error'   ? 'var(--c-rejected-bg)'  :
+           type==='warn'    ? 'var(--c-pending-bg)'   : 'var(--bg-surface2)';
+  var fg = type==='success' ? 'var(--c-verified-fg)'  :
+           type==='error'   ? 'var(--c-rejected-fg)'  :
+           type==='warn'    ? 'var(--c-pending-fg)'   : 'var(--text-secondary)';
+  el.innerHTML = '<div style="padding:10px 14px;border-radius:var(--radius-sm);background:'+bg+';color:'+fg+';font-size:13px;border:1px solid '+fg+'30;">'+msg+'</div>';
+}
+
+function bankDoImport() {
+  bankSetStatus('⏳ Checking file…', 'info');
+
+  var inp = document.getElementById('bank-file-input');
+  if (!inp) { bankSetStatus('❌ File input not found on page.', 'error'); return; }
+  if (!inp.files || inp.files.length === 0) { bankSetStatus('⚠️ Please select a file first.', 'warn'); return; }
+
+  var file = inp.files[0];
+  var ext  = file.name.split('.').pop().toLowerCase();
+  if (['xls','xlsx','csv'].indexOf(ext) < 0) {
+    bankSetStatus('❌ Please select an XLS, XLSX or CSV file.', 'error');
+    return;
+  }
+
+  var btn = document.getElementById('bank-import-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Reading…'; }
+  bankSetStatus('⏳ Step 1/3 — Reading file (' + file.name + ', ' + Math.round(file.size/1024) + ' KB)…', 'info');
+
+  var reader = new FileReader();
+
+  reader.onerror = function() {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 Import Statement'; }
+    bankSetStatus('❌ FileReader error — could not read the file.', 'error');
+  };
+
+  reader.onload = function(ev) {
+    if (btn) btn.textContent = '⏳ Converting…';
+    bankSetStatus('⏳ Step 2/3 — Converting file…', 'info');
+
+    var payload;
+    try {
+      if (ext === 'csv') {
+        payload = { type: 'csv', content: ev.target.result, filename: file.name, account: bankAccount };
+      } else {
+        var ab  = ev.target.result;
+        var arr = new Uint8Array(ab);
+        var bin = '';
+        for (var i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+        payload = { type: 'xls', content: btoa(bin), filename: file.name, account: bankAccount };
+      }
+    } catch(convErr) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import Statement'; }
+      bankSetStatus('❌ Conversion error: ' + convErr.message, 'error');
+      return;
+    }
+
+    if (btn) btn.textContent = '⏳ Importing…';
+    bankSetStatus('⏳ Step 3/3 — Sending to server and matching transactions…', 'info');
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Import Statement'; }
+        if (!res || !res.success) {
+          bankSetStatus('❌ Server error: ' + (res ? res.error : 'no response'), 'error');
+          return;
+        }
+        var r = res.data || {};
+        bankSetStatus(
+          '✓ Done! <strong>' + (r.imported||0) + ' new</strong> transactions imported · ' +
+          '<strong>' + (r.duplicates||0) + '</strong> duplicates skipped' +
+          (r.skippedBad ? ' · ' + r.skippedBad + ' malformed fragments ignored' : '') +
+          (r.paymentsCreated ? ' · <strong>' + r.paymentsCreated + ' payments posted</strong> to the ledger' : '') + '.',
+          'success'
+        );
+        inp.value = '';
+        bankLoadStats();
+        bankLoadTxns();
+      })
+      .withFailureHandler(function(err) {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Import Statement'; }
+        bankSetStatus('❌ Server call failed: ' + String(err), 'error');
+      })
+      .importBankFile(payload);
+  };
+
+  if (ext === 'csv') reader.readAsText(file);
+  else reader.readAsArrayBuffer(file);
+}
+
+// Stats now reflect whatever is currently in view (tab + filters), computed
+// from the filtered list rather than the whole dataset.
+function bankRenderStats(list) {
+  var el = document.getElementById('bank-stats-grid');
+  if (!el) return;
+  var isCredit = (bankDir === 'credit');
+  var total = list.length, sum = 0, done = 0, todo = 0;
+  for (var i=0;i<list.length;i++){
+    var t = list[i];
+    if (isCredit) {
+      sum += Number(t.credit||0);
+      if (t.match_type && t.match_type!=='unmatched') done++; else todo++;
+    } else {
+      sum += Number(t.debit||0);
+      if (t.expense_category && String(t.expense_category).trim()) done++; else todo++;
+    }
+  }
+  var rate = total ? Math.round(done/total*100) : 0;
+
+  function card(cls,label,value,sub){
+    return '<div class="stat-card '+cls+'"><div class="stat-label">'+label+'</div>'+
+      '<div class="stat-value">'+value+'</div><div class="stat-sub">'+sub+'</div></div>';
+  }
+  var amtCard = '<div class="stat-card gold"><div class="stat-label">'+
+    (isCredit?'Total Received':'Total Paid')+'</div>'+
+    '<div class="stat-value" style="font-size:20px;">'+formatRupees(sum)+'</div>'+
+    '<div class="stat-sub">'+total+' entr'+(total===1?'y':'ies')+'</div></div>';
+
+  if (isCredit) {
+    el.innerHTML =
+      card('info','Total Records', total, 'in view') +
+      card('green','Matched', done, rate+'% rate') +
+      card('red','Unmatched', todo, 'need review') +
+      amtCard;
+  } else {
+    el.innerHTML =
+      card('info','Total Records', total, 'in view') +
+      card('green','Categorised', done, rate+'% done') +
+      card('red','Uncategorised', todo, 'need review') +
+      amtCard;
+  }
+}
+
+// Kept for existing callers — stats refresh happens through bankFilter now.
+function bankLoadStats() { bankFilter(); }
+
+var bankPortionsMap = {}; // txn_id -> [portions] — derived from the BankPortions table, never stored on the bank row
+// Spreadsheet-style value filter on the Credit column: null = all
+// amounts; else a map of the amount-strings currently ticked.
+var bankAmountFilter = null;
+
+// ── Narration unit-hint cross-check ──
+// Payers often type their flat into the UPI remark ("903waste",
+// "B506 maint"). When such a hint exists AND the matched unit's number
+// disagrees with it, the row gets a loud ⚠️ — the exact defence against
+// a fuzzy NAME match landing on the wrong person's unit. Display-only:
+// it never changes data, it makes a human look.
+function bankUnitHintMismatch(narration, matchUnit) {
+  if (!matchUnit) return null;
+  var n = String(narration || '');
+  // Unit-like tokens: optional A/B + 3 digits (first digit 1-9), NOT
+  // embedded inside a longer digit run (so UPI reference numbers and
+  // amounts never trigger it).
+  var re = /(^|[^0-9A-Za-z])([ABab]?)([1-9]\d{2})(?![0-9])/g;
+  var m;
+  var hints = [];
+  while ((m = re.exec(n)) !== null) {
+    hints.push({ tower: m[2].toUpperCase(), num: m[3] });
+  }
+  if (!hints.length) return null;
+  var mu = String(matchUnit).toUpperCase();
+  var muTower = mu.charAt(0);
+  var muNum = mu.slice(1);
+  // If ANY hint agrees with the matched unit, all is well.
+  for (var i = 0; i < hints.length; i++) {
+    if (hints[i].num === muNum && (!hints[i].tower || hints[i].tower === muTower)) return null;
+  }
+  // Otherwise report the first plausible hint as the disagreement.
+  var hint = hints[0];
+  var hintLabel = hint.tower ? hint.tower + hint.num
+    : (hint.num.charAt(0) === '9' ? 'B' + hint.num + ' (only Tower B has a 9th floor)' : hint.num + ' (A' + hint.num + ' or B' + hint.num + '?)');
+  return hintLabel;
+}
+
+function bankOpenAmountFilter(ev) {
+  ev.stopPropagation();
+  // Distinct credit amounts for the CURRENT account & credit tab,
+  // with occurrence counts — exactly like a spreadsheet's filter list.
+  var counts = {};
+  bankAllTxns.forEach(function(t) {
+    if (!bankIsCredit(t)) return;
+    var a = Number(t.credit || 0);
+    if (!(a > 0)) return;
+    var k = String(a);
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  var values = [];
+  for (var k in counts) values.push({ v: k, label: '₹' + Number(k).toLocaleString('en-IN'), count: counts[k] });
+  values.sort(function(a, b) { return Number(a.v) - Number(b.v); });
+  svfOpen({
+    title: 'Filter by Credited Amount',
+    values: values,
+    selected: bankAmountFilter,
+    anchorEvent: ev,
+    onApply: function(sel) {
+      bankAmountFilter = sel;
+      bankFilter();
+    }
+  });
+}
+
+function bankLoadTxns() {
+  var el = document.getElementById('bank-txn-table');
+  if (el) el.innerHTML = loadingHtml('Loading…');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      bankAllTxns = (res && res.success && res.data) ? res.data : [];
+      // Fetch which transactions have splits BEFORE first render, so
+      // split addendum rows appear immediately rather than popping in.
+      google.script.run.withSuccessHandler(function(r2) {
+        bankPortionsMap = (r2 && r2.success && r2.data) ? r2.data : {};
+        bankPopulateDateFilters();
+        bankFilter();
+      }).withFailureHandler(function() {
+        bankPopulateDateFilters();
+        bankFilter();
+      }).doPost_internal('bank.getPortionsMap', bankAcct({}));
+    })
+    .withFailureHandler(function(err) {
+      var el = document.getElementById('bank-txn-table');
+      if (el) el.innerHTML = '<div style="color:var(--c-rejected-fg);padding:20px;">Error: '+err+'</div>';
+    })
+    .doPost_internal('bank.getAll', bankAcct({}));
+}
+
+function bankSetDir(dir) {
+  bankDir = dir;
+  var ct = document.getElementById('bank-tab-credit');
+  var dt = document.getElementById('bank-tab-debit');
+  if (ct) ct.className = 'ledger-tab' + (dir==='credit'?' ledger-tab-active':'');
+  if (dt) dt.className = 'ledger-tab' + (dir==='debit'?' ledger-tab-active':'');
+  // Credit filters (match + payment type) show only on the credit tab;
+  // the expense-category filter shows only on the debit tab.
+  var mEl = document.getElementById('bank-f-match');
+  var pEl = document.getElementById('bank-f-pay');
+  var eEl = document.getElementById('bank-f-exp');
+  if (mEl) mEl.style.display = dir==='credit' ? '' : 'none';
+  if (pEl) pEl.style.display = dir==='credit' ? '' : 'none';
+  if (eEl) eEl.style.display = dir==='debit'  ? '' : 'none';
+  bankFilter();
+}
+
+function bankIsCredit(t) {
+  if (t.direction) return t.direction === 'credit';
+  return Number(t.credit||0) > 0;
+}
+function bankIsDebit(t) {
+  if (t.direction) return t.direction === 'debit';
+  return Number(t.debit||0) > 0;
+}
+
+function bankFilter() {
+  var q  = (document.getElementById('bank-q')||{}).value||'';
+  var m  = (document.getElementById('bank-f-match')||{}).value||'';
+  var p  = (document.getElementById('bank-f-pay')||{}).value||'';
+  var ex = (document.getElementById('bank-f-exp')||{}).value||'';
+  var yr = (document.getElementById('bank-f-year')||{}).value||'';
+  var mn = (document.getElementById('bank-f-monthsel')||{}).value||'';
+  var ql = q.toLowerCase();
+  var f  = bankAllTxns.filter(function(t) {
+    // Tab: credit vs debit
+    var dirOk = bankDir==='credit' ? bankIsCredit(t) : bankIsDebit(t);
+    if (!dirOk) return false;
+    var qm = !q ||
+      (t.narration||'').toLowerCase().indexOf(ql)>-1 ||
+      (t.parsed_name||'').toLowerCase().indexOf(ql)>-1 ||
+      (t.match_name||'').toLowerCase().indexOf(ql)>-1 ||
+      (t.match_unit||'').toLowerCase().indexOf(ql)>-1 ||
+      (t.expense_category||'').toLowerCase().indexOf(ql)>-1;
+    var mm  = bankDir!=='credit' || !m  || t.match_type===m;
+    // Type filter — a split transaction's own field no longer literally
+    // equals a single type (it's "Split (2): Maintenance, LPG"), so it's
+    // matched by checking whether the selected type appears in that
+    // label, not by exact equality. Non-split transactions still use a
+    // plain exact match, unchanged.
+    var pm = bankDir !== 'credit' || !p || t.payment_type === p ||
+      (/^Split \(/.test(t.payment_type || '') && t.payment_type.indexOf(p) > -1);
+    var em  = bankDir!=='debit'  || !ex || t.expense_category===ex;
+    // Spreadsheet-style amount filter (credit tab only)
+    var am = bankDir!=='credit' || bankAmountFilter===null || bankAmountFilter[String(Number(t.credit||0))]===true;
+    // Year / month filter
+    var dm = true;
+    if (yr || mn) {
+      var ym = bankParseYM(t.date);
+      if (!ym) { dm = false; }
+      else {
+        if (yr && ym.year  !== parseInt(yr,10)) dm = false;
+        if (mn && ym.month !== parseInt(mn,10)) dm = false;
+      }
+    }
+    return qm && mm && pm && em && dm && am;
+  });
+  bankRenderStats(f);
+  bankRender(f);
+}
+
+// Extract { year, month } from a stored transaction date, whatever its
+// format: ISO (2026-01-15), DD-Mon-YYYY (01-Jan-2026), or numeric DD/MM/YYYY.
+// Numeric dates are read day-first (Indian convention) unless the numbers
+// prove otherwise. Returns null if no date can be read.
+function bankParseYM(d) {
+  if (!d) return null;
+  var s   = String(d).trim();
+  var low = s.toLowerCase();
+  var mn  = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+
+  var iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return { year: parseInt(iso[1],10), month: parseInt(iso[2],10) };
+
+  var nameM = low.match(/(\d{1,2})[-\/ ]([a-z]{3})[a-z]*[-\/ ](\d{2,4})/);
+  if (nameM && mn[nameM[2]]) {
+    var y1 = parseInt(nameM[3],10); if (y1 < 100) y1 += 2000;
+    return { year: y1, month: mn[nameM[2]] };
+  }
+
+  var num = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
+  if (num) {
+    var yy = parseInt(num[3],10); if (yy < 100) yy += 2000;
+    var a  = parseInt(num[1],10), b = parseInt(num[2],10);
+    var month = b;                      // day-first: second part is month
+    if (b > 12 && a <= 12) month = a;   // ...unless the numbers prove month-first
+    return { year: yy, month: month };
+  }
+
+  var yM = s.match(/(20\d{2})/);
+  if (yM) {
+    var mm = 0;
+    for (var k in mn) { if (low.indexOf(k) > -1) { mm = mn[k]; break; } }
+    return { year: parseInt(yM[1],10), month: mm };
+  }
+  return null;
+}
+
+// Populate the Year dropdown from the years actually present in the data,
+// always including 2023–2025 and the current year, and auto-expanding to any
+// future year (2027+) once a transaction for it exists. Defaults the Year and
+// Month selectors to the current year/month on first load only.
+var bankDateFilterInit = false;
+function bankPopulateDateFilters() {
+  var ySel = document.getElementById('bank-f-year');
+  if (!ySel) return;
+
+  var present = {};
+  for (var i = 0; i < bankAllTxns.length; i++) {
+    var ym = bankParseYM(bankAllTxns[i].date);
+    if (ym && ym.year) present[ym.year] = true;
+  }
+  var now      = new Date();
+  var curYear  = now.getFullYear();
+  var curMonth = now.getMonth() + 1;
+
+  // Base years always offered, plus any found in data, plus the current year
+  var years = {};
+  [2023, 2024, 2025, curYear].forEach(function(y){ years[y] = true; });
+  for (var k in present) years[parseInt(k,10)] = true;
+
+  var list = [];
+  for (var yk in years) list.push(parseInt(yk,10));
+  list.sort(function(a,b){ return b - a; });   // newest first
+
+  var prev = ySel.value;                        // preserve any existing choice
+  var html = '<option value="">All Years</option>';
+  for (var j = 0; j < list.length; j++) {
+    html += '<option value="'+list[j]+'">'+list[j]+'</option>';
+  }
+  ySel.innerHTML = html;
+
+  if (!bankDateFilterInit) {
+    // First load: default to current year + current month
+    ySel.value = String(curYear);
+    var mSel = document.getElementById('bank-f-monthsel');
+    if (mSel) mSel.value = String(curMonth);
+    bankDateFilterInit = true;
+  } else if (prev) {
+    ySel.value = prev;                          // keep the user's selection
+  }
+}
+
+function bankClearFilters() {
+  ['bank-q','bank-f-match','bank-f-pay','bank-f-exp','bank-f-year','bank-f-monthsel'].forEach(function(id){
+    var e=document.getElementById(id); if(e) e.value='';
+  });
+  bankFilter();
+}
+
+function bankRender(txns) {
+  var ce = document.getElementById('bank-txn-count');
+  if (ce) ce.textContent = txns.length + ' record' + (txns.length!==1?'s':'');
+  var el = document.getElementById('bank-txn-table');
+  if (!el) return;
+  if (!txns.length) {
+    el.innerHTML = emptyHtml('🏦', bankDir==='credit'
+      ? 'No money-received (credit) transactions found.'
+      : 'No payments-made (debit) transactions found.');
+    return;
+  }
+
+  if (bankDir === 'debit') { bankRenderDebit(txns, el); return; }
+
+  // Portion status comes from the BankPortions table (fetched as one
+  // map at load time), NEVER from the bank row's own fields — those
+  // stay intact and mean what they say.
+  _bankRenderCreditTable(txns, el, bankPortionsMap);
+}
+
+function _bankRenderCreditTable(txns, el, splitMap) {
+  // ── Credit view: money received ──
+  var h = '<div class="table-wrap"><table><thead><tr>'+
+    '<th>#</th><th>Date</th><th>Narration</th><th>Name (Bank)</th>'+
+    '<th style="text-align:right">Credit <span onclick="bankOpenAmountFilter(event)" title="Filter by amount — tick/untick values like a spreadsheet filter" style="cursor:pointer;'+(bankAmountFilter?'color:var(--accent);':'opacity:.55;')+'">'+(bankAmountFilter?'▼':'▽')+'</span></th>'+
+    '<th>Type</th>'+
+    '<th>Matched</th>'+
+    '<th>Note</th>'+
+    '<th>Act.</th>'+
+    '</tr></thead><tbody>';
+
+  var rowNum = 0;
+  txns.forEach(function(t) {
+    var tid=bankE(t.txn_id), tn=bankE(t.parsed_name), tu=bankE(t.match_unit), tt=bankE(t.match_type), tp=bankE(t.payment_type);
+    var portions = splitMap[t.txn_id];
+
+    // The ORIGINAL bank row always renders fully intact — real Type
+    // (with its edit pencil), Match/Edit button, date editor, note —
+    // regardless of whether it has portions. The bank row is the true
+    // source document; portions never alter how it appears or behaves.
+    rowNum++;
+    var mc = 'mp-'+(t.match_type||'unmatched');
+    var ml = t.match_type==='owner'?'👤 Owner':t.match_type==='tenant'?'🏠 Tenant':'❓';
+    var cr2 = (t.credit&&Number(t.credit)>0)?'<strong style="color:var(--c-verified-fg)">₹'+Number(t.credit).toLocaleString('en-IN')+'</strong>':'—';
+    var unitLine = t.match_unit ? '<div style="font-size:11px;color:var(--accent);font-weight:700;margin-top:1px;cursor:pointer;text-decoration:underline;" title="Open Unit Profile" onclick="event.stopPropagation();openUnitProfile(\''+bankE(t.match_unit)+'\')">'+bankE(t.match_unit)+'</div>' : '';
+    var hintMismatch = bankUnitHintMismatch(t.narration, t.match_unit);
+    var matchCell2 = '<span class="pill '+mc+'">'+ml+'</span>'+
+      (t.match_name?'<div style="font-size:10px;color:var(--text-muted);margin-top:1px">'+bankE(t.match_name)+'</div>':'')+unitLine+
+      (hintMismatch?'<div style="font-size:10px;color:#f59e0b;font-weight:700;margin-top:2px;" title="The payer typed a flat number into the payment remark that disagrees with the matched unit — a classic sign of a wrong fuzzy-name match. Verify, and use Edit → Unmatch if it\'s wrong.">⚠️ narration says '+bankE(hintMismatch)+'</div>':'');
+    h += '<tr id="bank-row-'+tid+'"'+(bankActiveTxn===t.txn_id?' class="bank-row-active"':'')+' onclick="bankSelectRow(\''+tid+'\')">'+
+      '<td style="font-size:11px;color:var(--text-muted);font-weight:700">'+rowNum+'</td>'+
+      '<td style="font-size:12px"><div class="cell-editable">'+bankE(formatDate(t.date))+'<span class="edit-pencil" title="Correct date" onclick="event.stopPropagation();bankOpenDateEdit(\''+tid+'\')">✏️</span></div></td>'+
+      '<td><div class="bank-narr">'+bankE(t.narration)+'</div></td>'+
+      '<td style="font-weight:600;font-size:13px">'+(bankE(t.parsed_name)||'—')+'</td>'+
+      '<td style="text-align:right">'+cr2+'</td>'+
+      '<td>'+bankTypeCell(tid, t.payment_type)+'</td>'+
+      '<td>'+matchCell2+'</td>'+
+      '<td>'+bankNoteCell(tid, t.note)+'</td>'+
+      '<td style="white-space:nowrap;"><button class="btn btn-xs btn-outline" onclick="bankOpenMatch(\''+tid+'\',\''+tn+'\',\''+tu+'\',\''+tt+'\',\''+tp+'\')">'+(t.match_type==='unmatched'?'Match':'Edit')+'</button>'+
+        (Number(t.credit||0)>0 ? ' <button class="btn btn-xs btn-outline" title="'+(portions&&portions.length?'Edit this transaction\'s portions':'Assign portions — multiple units and/or fee types for this one payment (parked funds; months are allocated manually on the Unit Profile)')+'" onclick="event.stopPropagation();bankOpenPortions(\''+tid+'\')">🧩'+(portions&&portions.length?' Portions':'')+'</button>' : '') +
+      '</td>'+
+      '</tr>';
+
+    // Portions render as a small ADDENDUM beneath the intact original —
+    // one muted sub-row per portion showing amount, type, and unit.
+    // Months are deliberately absent: portions are PARKED FUNDS; month
+    // allocation is a manual step on the Unit Profile.
+    if (portions && portions.length) {
+      portions.forEach(function(s, si) {
+        var typeLabel = (BANK_CREDIT_TYPES.filter(function(bt){return bt.v===s.payment_type;})[0]||{}).l || s.payment_type;
+        h += '<tr class="bank-split-subrow" onclick="bankSelectRow(\''+tid+'\')">'+
+          '<td></td>'+
+          '<td style="font-size:10px;color:var(--text-muted);">↳ portion '+(si+1)+'/'+portions.length+'</td>'+
+          '<td style="font-size:11px;color:var(--text-muted);font-style:italic;">Parked — allocate months on the Unit Profile</td>'+
+          '<td></td>'+
+          '<td style="text-align:right;font-size:12px;">₹'+Number(s.amount).toLocaleString('en-IN')+'</td>'+
+          '<td style="font-size:11px;">'+bankE(typeLabel)+'</td>'+
+          '<td><span class="pill mp-owner">🏠 '+bankE(s.unit_id)+'</span></td>'+
+          '<td></td><td></td>'+
+          '</tr>';
+      });
+    }
+  });
+  el.innerHTML = h + '</tbody></table></div>';
+  bankApplyColWidths('credit');
+}
+
+// The seven selectable credit types. Value = internal canonical string used by
+// the ledger allocation; label = friendly text shown to the user.
+var BANK_CREDIT_TYPES = [
+  { v:'Maintenance',       l:'Maintenance Fee' },
+  { v:'Waste Management',  l:'Waste Management Fee' },
+  { v:'LPG',               l:'LPG' },
+  { v:'Caution Deposit',   l:'Caution Deposit' },
+  { v:'Party Hall Rental', l:'Party Hall Rental' },
+  { v:'Bank Interest',     l:'Bank Interest' },
+  { v:'Miscellaneous',     l:'Miscellaneous' }
+];
+
+function bankFindTxn(txnId) {
+  for (var i=0;i<bankAllTxns.length;i++){ if(bankAllTxns[i].txn_id===txnId) return bankAllTxns[i]; }
+  return null;
+}
+
+function bankTypeLabel(v) {
+  if (!v || v==='Unknown') return '';
+  for (var i=0;i<BANK_CREDIT_TYPES.length;i++){ if(BANK_CREDIT_TYPES[i].v===v) return BANK_CREDIT_TYPES[i].l; }
+  return v;
+}
+
+// Distinct colour per credit type (translucent bg + saturated text — works on
+// both light and dark themes).
+var BANK_TYPE_COLORS = {
+  'Maintenance':       { bg:'rgba(59,130,246,.16)',  fg:'#3b82f6' },
+  'Waste Management':  { bg:'rgba(16,185,129,.16)',  fg:'#10b981' },
+  'LPG':               { bg:'rgba(245,158,11,.18)',  fg:'#f59e0b' },
+  'Caution Deposit':   { bg:'rgba(20,184,166,.16)',  fg:'#14b8a6' },
+  'Party Hall Rental': { bg:'rgba(236,72,153,.16)',  fg:'#ec4899' },
+  'Bank Interest':     { bg:'rgba(168,85,247,.16)',  fg:'#a855f7' },
+  'Miscellaneous':     { bg:'rgba(100,116,139,.20)', fg:'#64748b' }
+};
+function bankTypeColor(v) {
+  return BANK_TYPE_COLORS[v] || { bg:'rgba(0,200,150,.14)', fg:'var(--accent)' };
+}
+
+// Read-only pill + a small pencil to open the picker. No accidental changes.
+// The Type always shows the REAL fee type — a split never changes it. A
+// small ✂️ badge (from the split table, not this field) marks split rows
+// and opens the breakdown.
+function bankTypeCell(txnId, current) {
+  var lbl = bankTypeLabel(current);
+  var pill;
+  if (lbl) {
+    var c = bankTypeColor(current);
+    pill = '<span class="pill pill-type" style="background:'+c.bg+';color:'+c.fg+';">'+bankE(lbl)+'</span>';
+  } else {
+    pill = '<span class="type-unset">Unclassified</span>';
+  }
+  var splitBadge = (bankPortionsMap[txnId] && bankPortionsMap[txnId].length)
+    ? '<span title="This transaction has portions — click for the breakdown" onclick="event.stopPropagation();bankShowPortionDetail(\''+txnId+'\')" style="cursor:pointer;font-size:10px;color:var(--accent);text-decoration:underline;margin-left:2px;">🧩 portions</span>'
+    : '';
+  return '<div class="cell-editable">'+pill+
+    '<span class="edit-pencil" title="Edit type" onclick="bankOpenTypeEdit(\''+txnId+'\')">✏️</span>'+splitBadge+'</div>';
+}
+
+// Note is shown only when present; otherwise a subtle "+ Note" affordance.
+function bankNoteCell(txnId, note) {
+  if (note && String(note).trim()) {
+    return '<div class="cell-editable">'+
+      '<span class="note-text" title="'+bankE(note)+'">'+bankE(note)+'</span>'+
+      '<span class="edit-pencil" title="Edit note" onclick="bankOpenNoteEdit(\''+txnId+'\')">✏️</span></div>';
+  }
+  return '<button class="add-note-btn" onclick="bankOpenNoteEdit(\''+txnId+'\')">+ Note</button>';
+}
+
+// ── Type picker (small pop-up window, like the Owners edit pattern) ──
+function bankOpenTypeEdit(txnId) {
+  var t   = bankFindTxn(txnId);
+  var cur = t ? (t.payment_type||'') : '';
+  var amt = t ? (Number(t.credit)>0 ? '₹'+Number(t.credit).toLocaleString('en-IN')
+              : (Number(t.debit)>0 ? '₹'+Number(t.debit).toLocaleString('en-IN') : '')) : '';
+  var narr = t ? (t.narration||'') : '';
+  var choices = '';
+  for (var i=0;i<BANK_CREDIT_TYPES.length;i++){
+    var o = BANK_CREDIT_TYPES[i];
+    var active = (o.v===cur);
+    var col = bankTypeColor(o.v);
+    choices += '<button class="type-choice'+(active?' type-choice-active':'')+'" '+
+      'onclick="bankPickType(\''+txnId+'\',\''+bankE(o.v)+'\')">'+
+      '<span class="type-dot" style="background:'+col.fg+'"></span>'+
+      bankE(o.l)+(active?' <span style="opacity:.7">✓</span>':'')+'</button>';
+  }
+  openModal(
+    '<div class="modal-header"><span class="modal-title">Set Fee Type</span>'+
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="txn-context"><div class="txn-context-narr">'+bankE(narr)+'</div>'+
+        (amt?'<div class="txn-context-amt">'+amt+'</div>':'')+'</div>'+
+      '<div class="type-choice-grid">'+choices+'</div>'+
+      (cur?'<button class="btn btn-outline btn-sm" style="margin-top:12px;width:100%" onclick="bankPickType(\''+txnId+'\',\'\')">Clear type</button>':'')+
+    '</div>'
+  );
+}
+
+function bankPickType(txnId, v) {
+  bankSaveType(txnId, v);
+  closeModalForce();
+}
+
+// ── Note editor (pop-up) ──
+function bankOpenNoteEdit(txnId) {
+  var t   = bankFindTxn(txnId);
+  var cur = t ? (t.note||'') : '';
+  var narr = t ? (t.narration||'') : '';
+  openModal(
+    '<div class="modal-header"><span class="modal-title">📝 Note</span>'+
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="txn-context"><div class="txn-context-narr">'+bankE(narr)+'</div></div>'+
+      '<div class="form-group"><label>Purpose / note for this transaction</label>'+
+        '<textarea id="bank-note-ta" rows="4" style="width:100%;resize:vertical" '+
+        'placeholder="e.g. Quarterly interest credited by bank">'+bankE(cur)+'</textarea></div>'+
+      '<div class="form-actions">'+
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>'+
+        (cur?'<button class="btn btn-outline" onclick="bankSubmitNote(\''+txnId+'\',true)">Delete</button>':'')+
+        '<button class="btn btn-accent" onclick="bankSubmitNote(\''+txnId+'\',false)">💾 Save</button>'+
+      '</div>'+
+    '</div>'
+  );
+  setTimeout(function(){ var ta=document.getElementById('bank-note-ta'); if(ta) ta.focus(); }, 60);
+}
+
+function bankSubmitNote(txnId, del) {
+  var note = '';
+  if (!del) { var ta=document.getElementById('bank-note-ta'); note = ta ? ta.value : ''; }
+  bankSaveNote(txnId, note);
+  closeModalForce();
+}
+
+function bankSaveType(txnId, ptype) {
+  doPostWithHistoryConfirm('bank.setPaymentType', bankAcct({ txn_id: txnId, payment_type: ptype }),
+    function(res){
+      if (res && res.success) {
+        for (var i=0;i<bankAllTxns.length;i++){ if(bankAllTxns[i].txn_id===txnId){ bankAllTxns[i].payment_type=ptype; break; } }
+        showToast(ptype?('Type set to '+bankTypeLabel(ptype)):'Type cleared','success');
+        bankFilter();
+      } else { showToast((res&&res.error)||'Failed','error'); }
+    },
+    function(e){ showToast('Error: '+e,'error'); }
+  );
+}
+
+function bankSaveNote(txnId, note) {
+  doPostWithHistoryConfirm('bank.setNote', bankAcct({ txn_id: txnId, note: note }),
+    function(res){
+      if (res && res.success) {
+        for (var i=0;i<bankAllTxns.length;i++){ if(bankAllTxns[i].txn_id===txnId){ bankAllTxns[i].note=note; break; } }
+        showToast(note?'Note saved':'Note removed','success');
+        bankFilter();
+      } else { showToast((res&&res.error)||'Failed','error'); }
+    },
+    function(e){ showToast('Error: '+e,'error'); }
+  );
+}
+
+// ── Debit view: payments made by the association, by expense category ──
+function bankRenderDebit(txns, el) {
+  var opts = '<option value="">— Uncategorised —</option>';
+  for (var i=0;i<bankDebitCats.length;i++){
+    opts += '<option value="'+bankE(bankDebitCats[i])+'">'+bankE(bankDebitCats[i])+'</option>';
+  }
+  var h = '<div class="table-wrap"><table><thead><tr>'+
+    '<th>#</th><th>Date</th><th>Narration</th>'+
+    '<th style="text-align:right">Debit</th>'+
+    '<th>Expense Category</th>'+
+    '<th>Note</th>'+
+    '</tr></thead><tbody>';
+
+  txns.forEach(function(t, ti) {
+    var db = (t.debit&&Number(t.debit)>0)?'<strong style="color:var(--c-rejected-fg)">₹'+Number(t.debit).toLocaleString('en-IN')+'</strong>':'—';
+    var tid = bankE(t.txn_id);
+    var cur = t.expense_category||'';
+    var catCell = cur
+      ? '<div class="cell-editable"><span>'+bankE(cur)+'</span><span class="edit-pencil" title="Change category" onclick="event.stopPropagation();bankOpenExpenseMatch(\''+tid+'\')">✏️</span></div>'
+      : '<button class="add-note-btn" onclick="event.stopPropagation();bankOpenExpenseMatch(\''+tid+'\')">Match</button>';
+    h += '<tr id="bank-row-'+tid+'"'+(bankActiveTxn===t.txn_id?' class="bank-row-active"':'')+' onclick="bankSelectRow(\''+tid+'\')">'+
+      '<td style="font-size:11px;color:var(--text-muted);font-weight:700">'+(ti+1)+'</td>'+
+      '<td style="font-size:12px"><div class="cell-editable">'+bankE(formatDate(t.date))+'<span class="edit-pencil" title="Correct date" onclick="event.stopPropagation();bankOpenDateEdit(\''+tid+'\')">✏️</span></div></td>'+
+      '<td><div class="bank-narr">'+bankE(t.narration)+'</div></td>'+
+      '<td style="text-align:right">'+db+'</td>'+
+      '<td>'+catCell+'</td>'+
+      '<td>'+bankNoteCell(tid, t.note)+'</td>'+
+      '</tr>';
+  });
+  el.innerHTML = h + '</tbody></table></div>';
+  bankApplyColWidths('debit');
+}
+
+// ── Adjustable column widths (drag the right edge of any header) ────────
+// Widths are remembered per tab for the session and reapplied on re-render.
+var bankColW = { credit: null, debit: null };
+var bankActiveTxn = '';   // row highlighted after selection/editing (survives re-renders)
+function bankSelectRow(tid) {
+  if (bankActiveTxn === tid) return;
+  var prev = document.getElementById('bank-row-' + bankActiveTxn);
+  if (prev) prev.className = '';
+  bankActiveTxn = tid;
+  var cur = document.getElementById('bank-row-' + tid);
+  if (cur) cur.className = 'bank-row-active';
+}
+var BANK_DEFAULT_W = {
+  credit: [36, 88, 320, 130, 90, 140, 130, 160, 62],
+  debit:  [36, 88, 380, 95, 180, 170]
+};
+
+function bankApplyColWidths(view) {
+  var wrap = document.getElementById('bank-txn-table');
+  if (!wrap) return;
+  var ths = wrap.getElementsByTagName('th');
+  if (!ths.length) return;
+  var widths = bankColW[view] || BANK_DEFAULT_W[view] || [];
+  for (var i = 0; i < ths.length; i++) {
+    if (widths[i]) ths[i].style.width = widths[i] + 'px';
+    // resize handle
+    var rz = document.createElement('span');
+    rz.className = 'col-rz';
+    rz.setAttribute('data-i', i);
+    rz.onmousedown = bankRzStart(view, ths[i], i);
+    ths[i].appendChild(rz);
+  }
+}
+
+function bankRzStart(view, th, idx) {
+  return function(e) {
+    e.preventDefault();
+    var startX = e.clientX, startW = th.offsetWidth;
+    function move(ev) {
+      var w = Math.max(34, startW + (ev.clientX - startX));
+      th.style.width = w + 'px';
+    }
+    function up(ev) {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      if (!bankColW[view]) bankColW[view] = (BANK_DEFAULT_W[view] || []).slice(0);
+      bankColW[view][idx] = th.offsetWidth;
+    }
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  };
+}
+
+// ── Reconciliation report: OXYGEN vs the bank's stated balance ──────────
+function bankReconcile(yearOverride) {
+  var pageYearFilter = (document.getElementById('bank-f-year')||{}).value || '';
+  var year = yearOverride || (pageYearFilter ? Number(pageYearFilter) : new Date().getFullYear());
+  showToast('Reconciling ' + year + '…', '');
+  google.script.run
+    .withSuccessHandler(function(r) {
+      var rows = (r && r.success && r.data) ? r.data : null;
+      if (!rows) { showToast((r && r.error) || 'Reconcile failed', 'error'); return; }
+      var ok = 0, bad = 0, totCr = 0, totDb = 0, gapMonths = [];
+      for (var c = 0; c < rows.length; c++) {
+        if (rows[c].isGap) { gapMonths.push(rows[c].month); continue; }
+        if (rows[c].ok) ok++; else bad++; totCr += rows[c].credits; totDb += rows[c].debits;
+      }
+      function rup(n) { return n === null || n === undefined ? '—' : '₹' + Math.round(Number(n)).toLocaleString('en-IN'); }
+      function mName(k) {
+        var mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        var p = String(k).split('-');
+        return (mn[parseInt(p[1],10)-1] || p[1]) + ' ' + p[0];
+      }
+      var allOk = bad === 0 && ok > 0;
+      var partialCount = 0;
+      for (var pc = 0; pc < rows.length; pc++) if (rows[pc].possiblyPartial) partialCount++;
+      var yearOpts = '';
+      var thisYear = new Date().getFullYear();
+      for (var yy = thisYear + 1; yy >= 2020; yy--) yearOpts += '<option value="' + yy + '"' + (yy === year ? ' selected' : '') + '>' + yy + '</option>';
+      var h = '<div class="modal-header"><span class="modal-title">🔍 Balance Reconciliation — OXYGEN vs IOB</span>' +
+        '<select onchange="bankReconcile(Number(this.value))" style="margin-left:12px;padding:4px 8px;font-size:12.5px;">' + yearOpts + '</select>' +
+        '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+        '<div class="modal-body">' +
+        (rows.length === 0 ? '<div style="color:var(--text-muted);padding:20px;text-align:center;">No transactions for ' + year + ' yet.</div>' : '') +
+        // Verdict banner first
+        '<div style="border-radius:10px;padding:14px 18px;margin-bottom:14px;font-size:14px;font-weight:800;' +
+          (allOk ? 'background:var(--c-occupied-bg);color:var(--c-occupied-fg);' : 'background:var(--c-rejected-bg);color:var(--c-rejected-fg);') + '">' +
+          (allOk ? '✅ All ' + ok + ' months of ' + year + ' reconcile — the ledger matches the bank to the rupee.'
+                 : '⚠️ ' + bad + ' month(s) of ' + year + ' do NOT reconcile — investigate before trusting reports.') +
+        '</div>' +
+        (gapMonths.length ? '<div style="border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;background:var(--c-rejected-bg);color:var(--c-rejected-fg);font-weight:700;">' +
+          '⛔ ' + gapMonths.length + ' month(s) have ZERO imported transactions, sitting between months that DO have data: ' + gapMonths.map(mName).join(', ') + '. ' +
+          'If the real account had ANY activity in these months (even just bank interest), every month after them will be wrong until this is imported.</div>' : '') +
+        (partialCount ? '<div style="border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;background:rgba(245,158,11,.12);color:#f59e0b;font-weight:700;">' +
+          '🟡 ' + partialCount + ' month(s) reconcile perfectly but end well before month-end — likely only PARTIALLY imported. A ✓ only means the rows given add up correctly, not that every day of the month is in yet. See the 🟡 rows below.</div>' : '') +
+        // Summary cards
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px;">' +
+          '<div class="stat-card info"><div class="stat-label">Months Checked</div><div class="stat-value" style="font-size:22px">' + rows.length + '</div></div>' +
+          '<div class="stat-card green"><div class="stat-label">Reconciled</div><div class="stat-value" style="font-size:22px">' + ok + '</div></div>' +
+          '<div class="stat-card ' + (bad ? 'red' : 'green') + '"><div class="stat-label">Mismatched</div><div class="stat-value" style="font-size:22px">' + bad + '</div></div>' +
+          '<div class="stat-card gold"><div class="stat-label">Total Credits</div><div class="stat-value" style="font-size:17px">' + rup(totCr) + '</div></div>' +
+          '<div class="stat-card gold"><div class="stat-label">Total Debits</div><div class="stat-value" style="font-size:17px">' + rup(totDb) + '</div></div>' +
+        '</div>' +
+        '<div class="table-wrap" style="max-height:52vh;overflow:auto;border:1px solid var(--border-strong,var(--border));border-radius:8px;"><table style="border-collapse:collapse;width:100%"><thead><tr>' +
+        '<th style="text-align:left">Month</th><th style="text-align:right">Rows</th><th style="text-align:right">Opening</th>' +
+        '<th style="text-align:right">+ Credits</th><th style="text-align:right">− Debits</th>' +
+        '<th style="text-align:right">Computed</th><th style="text-align:right">Bank Stated</th>' +
+        '<th style="text-align:right">Difference</th><th style="text-align:center">Status</th><th></th></tr></thead><tbody>';
+      for (var i = 0; i < rows.length; i++) {
+        var m = rows[i];
+        if (m.isGap) {
+          h += '<tr style="background:var(--c-rejected-bg);"><td colspan="10" style="padding:8px 10px;font-weight:700;color:var(--c-rejected-fg);">' +
+            '⛔ ' + mName(m.month) + ' — NO transactions imported at all. If the real account had any activity this month, import it before trusting anything after this point.</td></tr>';
+          continue;
+        }
+        var statusIcon = m.ok ? (m.possiblyPartial ? '🟡' : '✅') : '⚠️';
+        var statusTitle = m.ok ? (m.possiblyPartial ? 'Reconciles, but only imported through day ' + m.lastDay + ' of ' + m.daysInMonth + ' — likely partial' : 'Fully reconciled') : 'Mismatch — investigate';
+        h += '<tr style="' + (m.ok ? (i % 2 ? 'background:var(--bg-surface2);' : '') : 'background:var(--c-rejected-bg);') + '">' +
+          '<td style="font-weight:800;white-space:nowrap">' + mName(m.month) + (m.possiblyPartial ? ' <span style="font-size:10px;font-weight:700;color:#f59e0b;" title="' + statusTitle + '">🟡 partial?</span>' : '') + '</td>' +
+          '<td style="text-align:right;color:var(--text-muted)">' + m.rows + '</td>' +
+          '<td style="text-align:right">' + rup(m.opening) + '</td>' +
+          '<td style="text-align:right;color:var(--c-verified-fg);font-weight:600">' + rup(m.credits) + '</td>' +
+          '<td style="text-align:right;color:var(--c-rejected-fg);font-weight:600">' + rup(m.debits) + '</td>' +
+          '<td style="text-align:right;font-weight:700">' + rup(m.computed) + '</td>' +
+          '<td style="text-align:right;font-weight:700">' + rup(m.stated) + '</td>' +
+          '<td style="text-align:right;font-weight:800;color:' + (m.ok ? 'var(--text-muted)' : 'var(--c-rejected-fg)') + '">' + (m.diff === null ? '—' : (m.ok ? '0' : rup(m.diff))) + '</td>' +
+          '<td style="text-align:center;font-size:15px;" title="' + statusTitle + '">' + statusIcon + '</td>' +
+          '<td>' + (m.ok ? '' : '<button class="btn btn-xs btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg)" onclick="bankReconcileDrilldown(\'' + m.month + '\')">🔍 Details</button>') + '</td></tr>';
+      }
+      h += '</tbody></table></div>' +
+        '<div style="margin-top:12px;font-size:11.5px;color:var(--text-muted);">How it works: Opening + Credits − Debits must equal the closing balance the bank itself printed. ' +
+        (bankAccount === '2'
+          ? 'This is the IOB LPG account, reconciled completely separately from the main account — its own months, its own chain, never mixed. Since this account is largely dormant, the "possibly partial" 🟡 check is turned off here (a low-activity month isn\'t incomplete, just quiet).'
+          : '🟡 means the month is arithmetically consistent but its last imported transaction falls more than 3 days short of month-end — a signal to check whether the rest of that month still needs importing, not an error.') +
+        ' Originals are archived untouched in Drive → <strong>OXYGEN Bank Statement Repository</strong>.</div>' +
+        '</div>';
+      openModal(h);
+      var box = document.getElementById('modal-box');
+      if (box) { box.style.maxWidth = '940px'; box.style.width = '92vw'; box.style.maxHeight = '88vh'; }
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('bank.reconcile', bankAcct({ year: year }));
+}
+
+// Row-by-row breakdown for a mismatched month — shows exactly where the
+// running balance first diverges from the bank's own stated figures.
+function bankReconcileDrilldown(monthKey) {
+  var mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var parts = monthKey.split('-');
+  var label = mn[parseInt(parts[1],10)-1] + ' ' + parts[0];
+  showToast('Loading details…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    var rows = (r && r.success && r.data) ? r.data : null;
+    if (!rows) { showToast((r && r.error) || 'Failed to load details', 'error'); return; }
+    function rup(n) { return n === null || n === undefined ? '—' : '₹' + Math.round(Number(n)).toLocaleString('en-IN'); }
+    var firstBad = -1;
+    for (var i = 0; i < rows.length; i++) { if (!rows[i].ok) { firstBad = i; break; } }
+    var h = '<div class="modal-header"><span class="modal-title">🔍 ' + label + ' — Row-by-Row Detail</span>' +
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+      '<div class="modal-body">' +
+      '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px;">Each row\'s computed balance is checked against the bank\'s own stated balance for that same row. ' +
+      (firstBad > -1 ? 'The first row where they disagree is highlighted below — that transaction (or the one just before it) is almost always the cause.' : 'No stated-balance rows found to check this month against.') +
+      '</div>' +
+      '<div class="table-wrap" style="max-height:55vh;overflow:auto;border:1px solid var(--border-strong,var(--border));border-radius:8px;"><table style="border-collapse:collapse;width:100%;font-size:12.5px;"><thead><tr>' +
+      '<th style="text-align:left;padding:6px 8px;">Date</th><th style="text-align:left;padding:6px 8px;">Narration</th>' +
+      '<th style="text-align:right;padding:6px 8px;">Credit</th><th style="text-align:right;padding:6px 8px;">Debit</th>' +
+      '<th style="text-align:right;padding:6px 8px;">Computed Bal.</th><th style="text-align:right;padding:6px 8px;">Bank Stated</th>' +
+      '<th style="text-align:right;padding:6px 8px;">Diff</th><th style="text-align:left;padding:6px 8px;">Category / Raw Debit</th></tr></thead><tbody>';
+    for (var j = 0; j < rows.length; j++) {
+      var d = rows[j];
+      var isFirstBad = (j === firstBad);
+      var isLpgTagged = (d.expenseCategory === 'LPG' || d.expenseCategory === 'LPG Inventory');
+      h += '<tr style="' + (isFirstBad ? 'background:var(--c-rejected-bg);box-shadow:inset 3px 0 0 var(--c-rejected-fg);' : (!d.ok ? 'background:var(--c-rejected-bg);opacity:.7;' : (isLpgTagged ? 'background:rgba(245,158,11,.12);' : ''))) + '">' +
+        '<td style="padding:6px 8px;white-space:nowrap;">' + formatDate(d.date) + (isFirstBad ? ' ⚠️' : '') + '</td>' +
+        '<td style="padding:6px 8px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + bankE(d.narration) + '">' + bankE(d.narration) + '</td>' +
+        '<td style="text-align:right;padding:6px 8px;color:var(--c-verified-fg);">' + (d.credit ? rup(d.credit) : '—') + '</td>' +
+        '<td style="text-align:right;padding:6px 8px;color:var(--c-rejected-fg);">' + (d.debit ? rup(d.debit) : '—') + '</td>' +
+        '<td style="text-align:right;padding:6px 8px;font-weight:700;">' + rup(d.computedBalance) + '</td>' +
+        '<td style="text-align:right;padding:6px 8px;font-weight:700;">' + rup(d.statedBalance) + '</td>' +
+        '<td style="text-align:right;padding:6px 8px;font-weight:800;color:' + (d.ok ? 'var(--text-muted)' : 'var(--c-rejected-fg)') + '">' + (d.diff === null ? '—' : (d.ok ? '0' : rup(d.diff))) + '</td>' +
+        '<td style="padding:6px 8px;font-size:11px;color:var(--text-muted);">' +
+          (isLpgTagged ? '<span style="color:#f59e0b;font-weight:700;">🔥 ' + bankE(d.expenseCategory) + '</span> · ' : '') +
+          'raw: "' + bankE(String(d.debitRaw)) + '" (' + d.debitRawType + ')' +
+        '</td>' +
+        '</tr>';
+    }
+    h += '</tbody></table></div>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;">Amber rows are tagged with the LPG / LPG Inventory expense category — the last column shows exactly what is stored in that row\'s Debit cell and its data type, which reveals whether a value the app can\'t read (rather than a truly missing transaction) is the cause.</div>' +
+      '</div>';
+    openModal(h);
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('bank.reconcileMonthDetail', bankAcct({ month: monthKey }));
+}
+
+// Manual date correction — for the rare case where a source file's date
+// cell was a genuine Excel date-type (rather than plain text) and got
+// shifted a day during the XLSX->Sheets conversion, before OXYGEN's own
+// import code ever saw the value.
+function bankOpenDateEdit(txnId) {
+  bankSelectRow(txnId);
+  var t = null;
+  for (var i = 0; i < bankAllTxns.length; i++) { if (bankAllTxns[i].txn_id === txnId) { t = bankAllTxns[i]; break; } }
+  if (!t) return;
+  openModal(
+    '<div class="modal-header"><span class="modal-title">✏️ Correct Transaction Date</span>' +
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+      '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Current: <strong>' + formatDate(t.date) + '</strong> — ' + bankE(t.narration) + '</div>' +
+      '<div class="form-group"><label>Correct Date</label><input id="bank-date-edit" type="date" value="' + (toDateInput ? toDateInput(t.date) : t.date) + '"></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+        '<button class="btn btn-accent" onclick="bankSaveDateEdit(\'' + txnId + '\')">💾 Save</button>' +
+      '</div></div>'
+  );
+}
+
+function bankSaveDateEdit(txnId) {
+  var newDate = (document.getElementById('bank-date-edit') || {}).value;
+  if (!newDate) { showToast('Pick a date', 'error'); return; }
+  doPostWithHistoryConfirm('bank.setDate', bankAcct({ txn_id: txnId, date: newDate }),
+    function(r) {
+      if (r && r.success) {
+        showToast('Date corrected', 'success');
+        closeModalForce();
+        var savedDate = (r.data && r.data.date) ? r.data.date : newDate;
+        for (var i = 0; i < bankAllTxns.length; i++) { if (bankAllTxns[i].txn_id === txnId) { bankAllTxns[i].date = savedDate; break; } }
+        if (typeof bankFilter === 'function') bankFilter();
+      } else showToast((r && r.error) || 'Failed', 'error');
+    },
+    function(e) { showToast('Error: ' + e, 'error'); }
+  );
+}
+
+function bankSaveExpense(txnId, category) {
+  doPostWithHistoryConfirm('bank.setExpenseCategory', bankAcct({ txn_id: txnId, expense_category: category }),
+    function(res) {
+      if (res && res.success) {
+        // update local cache so re-filtering keeps the value
+        for (var i=0;i<bankAllTxns.length;i++){
+          if (bankAllTxns[i].txn_id===txnId){ bankAllTxns[i].expense_category=category; break; }
+        }
+        showToast(category?('Set to '+category):'Category cleared','success');
+        if (typeof bankFilter === 'function') bankFilter();
+      } else { showToast((res&&res.error)||'Failed','error'); }
+    },
+    function(e){ showToast('Error: '+e,'error'); }
+  );
+}
+
+// Match popup for the Expense Category column — replaces the old
+// always-visible dropdown. Also offers to remember this narration as a
+// pattern (Settings page) so future matching transactions auto-categorize
+// without needing this popup again.
+function bankOpenExpenseMatch(txnId) {
+  bankSelectRow(txnId);
+  var t = null;
+  for (var i = 0; i < bankAllTxns.length; i++) { if (bankAllTxns[i].txn_id === txnId) { t = bankAllTxns[i]; break; } }
+  if (!t) return;
+  var cur = t.expense_category || '';
+  var catOptions = '<option value="">— Uncategorised —</option>' +
+    bankDebitCats.map(function(nm) { return '<option value="' + bankE(nm) + '"' + (nm === cur ? ' selected' : '') + '>' + bankE(nm) + '</option>'; }).join('');
+  openModal(
+    '<div class="modal-header"><span class="modal-title">🏷️ Match Expense Category</span>' +
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+      '<div style="background:var(--bg-surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px;font-size:12px;color:var(--text-muted);">' + bankE(t.narration) + '</div>' +
+      '<div class="form-group"><label>Expense Category</label><select id="bem-cat">' + catOptions + '</select></div>' +
+      '<div class="form-group" style="display:flex;align-items:center;gap:8px;">' +
+        '<input type="checkbox" id="bem-remember" style="width:auto;">' +
+        '<label for="bem-remember" style="margin:0;font-weight:400;">Also remember this as a pattern, so future matching payments auto-categorize</label>' +
+      '</div>' +
+      '<div class="form-group" id="bem-pattern-row" style="display:none;">' +
+        '<label>Pattern text (edit if needed — leave blank to match by amount alone)</label>' +
+        '<input id="bem-pattern" value="' + bankE(_bankSuggestPattern(t.narration)) + '">' +
+        '<label style="margin-top:8px;">Also require this exact amount (optional — useful when the vendor charges a fixed amount every time, like a cylinder delivery)</label>' +
+        '<input id="bem-amount" type="number" step="0.01" placeholder="e.g. 9120 — leave blank if the amount varies (KSEB, KWA)">' +
+      '</div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+        '<button class="btn btn-accent" onclick="bankSaveExpenseMatch(\'' + txnId + '\')">💾 Save</button>' +
+      '</div>' +
+    '</div>'
+  );
+  var cb = document.getElementById('bem-remember');
+  if (cb) cb.onchange = function() { document.getElementById('bem-pattern-row').style.display = cb.checked ? 'block' : 'none'; };
+}
+
+// A reasonable starting guess for the pattern text: strip leading
+// transaction codes/reference numbers (all-digit tokens, common prefixes)
+// and keep whatever distinctive text remains — the person can always edit it.
+function _bankSuggestPattern(narration) {
+  var n = String(narration || '');
+  var words = n.split(/\s+/).filter(function(w) { return w.length > 0 && !/^\d+$/.test(w) && !/^(TRTR|NEFT|IMPS|UPI|IB|MB|CR|DR)$/i.test(w.replace(/[\/\-]/g, '')); });
+  return words.join(' ').trim() || n.trim();
+}
+
+function bankSaveExpenseMatch(txnId) {
+  var cat = (document.getElementById('bem-cat') || {}).value || '';
+  var remember = (document.getElementById('bem-remember') || {}).checked;
+  var patternText = (document.getElementById('bem-pattern') || {}).value || '';
+  var amountText = (document.getElementById('bem-amount') || {}).value || '';
+
+  function finish() {
+    bankSaveExpense(txnId, cat);
+    closeModalForce();
+  }
+
+  if (remember && (patternText.trim() || amountText.trim()) && cat) {
+    google.script.run.withSuccessHandler(function(r) {
+      if (r && r.success) showToast('Pattern saved for future matches', 'success');
+      finish();
+    }).withFailureHandler(function(e) { showToast('Pattern not saved: ' + e, 'error'); finish(); })
+      .doPost_internal('expensePatterns.add', { pattern_text: patternText.trim(), amount: amountText.trim() || '', expense_category: cat });
+  } else {
+    finish();
+  }
+}
+
+// Load the active debit categories used to populate the dropdowns/filter
+function bankLoadDebitCats() {
+  google.script.run
+    .withSuccessHandler(function(res){
+      var list = (res&&res.success&&res.data)?res.data:[];
+      bankDebitCats = [];
+      for (var i=0;i<list.length;i++){ if(list[i].active!=='No') bankDebitCats.push(list[i].name); }
+      // populate the debit filter dropdown
+      var eEl = document.getElementById('bank-f-exp');
+      if (eEl) {
+        var html='<option value="">All Expense Categories</option>';
+        for (var k=0;k<bankDebitCats.length;k++){ html+='<option value="'+bankE(bankDebitCats[k])+'">'+bankE(bankDebitCats[k])+'</option>'; }
+        eEl.innerHTML = html;
+      }
+      if (bankDir==='debit') bankFilter();
+    })
+    .withFailureHandler(function(){})
+    .doPost_internal('categories.getAll', { kind: 'debit' });
+}
+
+// Splits one transaction into multiple payments — a combined MF+WMF+LPG
+// payment, a skipped month caught up with the next one, etc. Step 1:
+// how many payments does this represent; step 2: fill in each one, with
+// a live running total so the split can be checked before saving.
+// Shows the real breakdown behind a "Split (N)" label — the underlying
+// bank row always stays as one true transaction (matching the actual
+// bank statement), so the split itself is shown here rather than as
+// artificial extra rows in the main table.
+function bankShowPortionDetail(txnId) {
+  var portions = bankPortionsMap[txnId] || [];
+  var t = bankFindTxn(txnId);
+  var h = '<div class="modal-header"><span class="modal-title">🧩 Portion Breakdown</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">';
+  if (t) h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">' + bankE(formatDate(t.date)) + ' · ' + bankE(t.parsed_name || t.narration) + ' · <strong>' + formatRupees(Number(t.credit || 0)) + '</strong></div>';
+  if (!portions.length) {
+    h += '<div style="color:var(--text-muted);">No portions on this transaction.</div>';
+  } else {
+    h += '<table style="width:100%;font-size:12.5px;"><thead><tr><th style="text-align:left;">Unit</th><th style="text-align:left;">Type</th><th style="text-align:right;">Amount</th></tr></thead><tbody>';
+    portions.forEach(function(p) {
+      h += '<tr><td><span class="pill mp-owner" style="cursor:pointer;" onclick="closeModalForce();openUnitProfile(\'' + bankE(p.unit_id) + '\')">🏠 ' + bankE(p.unit_id) + '</span></td>' +
+        '<td>' + bankE(p.payment_type) + '</td><td style="text-align:right;">' + formatRupees(p.amount) + '</td></tr>';
+    });
+    h += '</tbody></table>';
+    h += '<div style="font-size:11.5px;color:var(--text-muted);margin-top:8px;">These amounts are PARKED per unit. Allocate them to months from each unit\'s Profile → Parked Funds.</div>';
+  }
+  h += '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Close</button>' +
+    '<button class="btn btn-accent" onclick="closeModalForce();bankOpenPortions(\'' + txnId + '\')">🧩 Edit Portions</button></div></div>';
+  openModal(h);
+}
+
+// ── Assign Portions — who paid what, in one bank transaction ──
+// Portions are (unit, fee type, amount) and MUST sum to the transaction
+// total. They create PARKED FUNDS only — never Fees records. No months
+// here by design: month allocation is 100% manual on the Unit Profile.
+var bankPortionRows = [];
+var bankPortionRowIdSeq = 1;
+var bankUnitsCache = null;
+
+function bankOpenPortions(txnId) {
+  var t = bankFindTxn(txnId);
+  if (!t) return;
+  var totalAmount = Number(t.credit || 0);
+  var existing = bankPortionsMap[txnId] || [];
+  if (existing.length) {
+    bankPortionRows = existing.map(function(p) { return { id: bankPortionRowIdSeq++, unit: p.unit_id, type: p.payment_type, amount: p.amount }; });
+  } else {
+    bankPortionRows = [
+      { id: bankPortionRowIdSeq++, unit: t.match_unit || '', type: (t.payment_type && t.payment_type.indexOf('Split') !== 0) ? t.payment_type : 'Maintenance', amount: totalAmount },
+      { id: bankPortionRowIdSeq++, unit: '', type: 'Maintenance', amount: 0 }
+    ];
+  }
+  bankEnsureUnitsThenRenderPortions(txnId, totalAmount);
+}
+
+function bankEnsureUnitsThenRenderPortions(txnId, totalAmount) {
+  if (bankUnitsCache) { bankRenderPortionsModal(txnId, totalAmount); return; }
+  google.script.run.withSuccessHandler(function(r) {
+    bankUnitsCache = (r && r.success && r.data) ? r.data.map(function(u) { return u.unit_id; }) : [];
+    bankRenderPortionsModal(txnId, totalAmount);
+  }).withFailureHandler(function() {
+    bankUnitsCache = [];
+    bankRenderPortionsModal(txnId, totalAmount);
+  }).doPost_internal('units.getAll', {});
+}
+
+function bankPortionRowById(rowId) {
+  for (var i = 0; i < bankPortionRows.length; i++) if (bankPortionRows[i].id === rowId) return bankPortionRows[i];
+  return null;
+}
+
+function bankPortionFieldChanged(rowId, field, value) {
+  var row = bankPortionRowById(rowId);
+  if (!row) return;
+  if (field === 'amount') row.amount = Number(value) || 0;
+  else row[field] = value;
+}
+
+function bankRenderPortionsModal(txnId, totalAmount) {
+  var t = bankFindTxn(txnId);
+  var unitOptionsFor = function(sel) {
+    var opts = '<option value="">— unit —</option>';
+    (bankUnitsCache || []).forEach(function(u) { opts += '<option value="' + bankE(u) + '"' + (u === sel ? ' selected' : '') + '>' + bankE(u) + '</option>'; });
+    return opts;
+  };
+  var typeOptionsFor = function(sel) {
+    var types = ['Maintenance', 'Waste Management', 'LPG', 'Caution Deposit', 'Party Hall Rental', 'Miscellaneous'];
+    return types.map(function(ty) { return '<option value="' + ty + '"' + (ty === sel ? ' selected' : '') + '>' + ty + '</option>'; }).join('');
+  };
+  var rowsHtml = '';
+  bankPortionRows.forEach(function(row) {
+    var rid = row.id;
+    rowsHtml += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;" id="bportion-row-' + rid + '">' +
+      '<div style="flex:1;"><label style="font-size:10px;color:var(--text-muted);display:block;">Unit</label>' +
+        '<select onchange="bankPortionFieldChanged(' + rid + ',\'unit\',this.value)" style="width:100%;padding:6px 8px;font-size:12px;">' + unitOptionsFor(row.unit) + '</select></div>' +
+      '<div style="flex:1;"><label style="font-size:10px;color:var(--text-muted);display:block;">Fee Type</label>' +
+        '<select onchange="bankPortionFieldChanged(' + rid + ',\'type\',this.value)" style="width:100%;padding:6px 8px;font-size:12px;">' + typeOptionsFor(row.type) + '</select></div>' +
+      '<div style="width:110px;"><label style="font-size:10px;color:var(--text-muted);display:block;">Amount (₹)</label>' +
+        '<input type="number" step="0.01" value="' + row.amount + '" oninput="bankPortionFieldChanged(' + rid + ',\'amount\',this.value);bankPortionRefreshRemaining(' + totalAmount + ')" style="width:100%;padding:6px 8px;font-size:12px;"></div>' +
+      '<button class="btn btn-xs btn-outline" title="Remove this portion" onclick="bankRemovePortionRow(' + rid + ',\'' + txnId + '\',' + totalAmount + ')">🗑</button>' +
+    '</div>';
+  });
+
+  openModal('<div class="modal-header"><span class="modal-title">🧩 Assign Portions</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+    '<div style="margin-bottom:10px;">' +
+      '<div style="font-size:12px;color:var(--text-muted);">' + bankE(formatDate(t.date)) + ' · ' + bankE(t.parsed_name || t.narration) + '</div>' +
+      '<div style="font-weight:700;font-size:18px;">Total: ' + formatRupees(totalAmount) + '</div>' +
+    '</div>' +
+    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">One row per portion: which unit, which fee type, how much. Portions must add up to the transaction total. This parks the money per unit — <strong>months are allocated manually afterwards on each Unit\'s Profile</strong>; nothing is posted to Fees Received from here.</div>' +
+    '<div id="bportion-rows">' + rowsHtml + '</div>' +
+    '<button class="btn btn-sm btn-outline" onclick="bankAddPortionRow(\'' + txnId + '\',' + totalAmount + ')">➕ Add portion</button>' +
+    '<div id="bportion-remaining" style="margin-top:10px;font-size:12.5px;font-weight:700;"></div>' +
+    '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+    '<button class="btn btn-accent" id="bportion-save" onclick="bankSavePortions(\'' + txnId + '\')">💾 Save Portions</button></div>' +
+    '</div>');
+  bankPortionRefreshRemaining(totalAmount);
+}
+
+function bankAddPortionRow(txnId, totalAmount) {
+  bankPortionRows.push({ id: bankPortionRowIdSeq++, unit: '', type: 'Maintenance', amount: 0 });
+  bankRenderPortionsModal(txnId, totalAmount);
+  bankPortionRefreshRemaining(totalAmount);
+}
+
+function bankRemovePortionRow(rowId, txnId, totalAmount) {
+  bankPortionRows = bankPortionRows.filter(function(r) { return r.id !== rowId; });
+  if (!bankPortionRows.length) bankPortionRows.push({ id: bankPortionRowIdSeq++, unit: '', type: 'Maintenance', amount: 0 });
+  bankRenderPortionsModal(txnId, totalAmount);
+  bankPortionRefreshRemaining(totalAmount);
+}
+
+function bankPortionRefreshRemaining(totalAmount) {
+  var sum = 0;
+  bankPortionRows.forEach(function(r) { sum += Number(r.amount) || 0; });
+  var remaining = Math.round((totalAmount - sum) * 100) / 100;
+  var el = document.getElementById('bportion-remaining');
+  if (!el) return;
+  if (Math.abs(remaining) < 0.005) {
+    el.innerHTML = '<span style="color:var(--c-verified-fg);">✓ Portions add up to the transaction total.</span>';
+  } else if (remaining > 0) {
+    el.innerHTML = '<span style="color:#f59e0b;">' + formatRupees(remaining) + ' still unassigned.</span>';
+  } else {
+    el.innerHTML = '<span style="color:var(--c-rejected-fg);">Over by ' + formatRupees(-remaining) + ' — portions exceed the transaction.</span>';
+  }
+}
+
+function bankSavePortions(txnId, confirmRemoveAutoposted) {
+  var portions = [];
+  for (var i = 0; i < bankPortionRows.length; i++) {
+    var r = bankPortionRows[i];
+    if (!(Number(r.amount) > 0) && !r.unit) continue; // fully empty row — ignore
+    if (!r.unit) { showToast('Every portion needs a unit', 'error'); return; }
+    if (!(Number(r.amount) > 0)) { showToast('Every portion needs an amount', 'error'); return; }
+    portions.push({ unit_id: r.unit, payment_type: r.type, amount: Number(r.amount) });
+  }
+  if (!portions.length) { showToast('Add at least one portion', 'error'); return; }
+  var btn = document.getElementById('bportion-save');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Saving…'; }
+  google.script.run.withSuccessHandler(function(r2) {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Save Portions'; }
+    if (r2 && r2.success && r2.data && r2.data.needs_confirm) {
+      // The automatic pipeline already posted Fees records for this
+      // transaction. NOTHING is removed silently — the list is shown,
+      // and only an explicit OK removes exactly these records.
+      var lines = r2.data.records.map(function(p) { return '  • ' + p.unit_id + ' ' + p.payment_type + ' ' + p.month + ' — ₹' + Number(p.amount).toLocaleString('en-IN'); }).join('\n');
+      var ok = confirm('This transaction was auto-posted to Fees Received by the simple pipeline. Assigning portions takes over from that, so these ' + r2.data.records.length + ' record(s) would be REMOVED:\n\n' + lines + '\n\nRemove them and save the portions?');
+      if (!ok) return;
+      bankSavePortions(txnId, true);
+      return;
+    }
+    if (!r2 || !r2.success) { showToast((r2 && r2.error) || 'Failed', 'error'); return; }
+    showToast('Portions saved — money is parked per unit. Allocate months from each Unit Profile.', 'success');
+    closeModalForce();
+    bankLoadTxns();
+  }).withFailureHandler(function(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Save Portions'; }
+    showToast('Error: ' + e, 'error');
+  }).doPost_internal('bank.assignPortions', bankAcct({ txn_id: txnId, portions: portions, confirm_remove_autoposted: confirmRemoveAutoposted === true }));
+}
+
+// Clears a wrong match. Two-phase: if the wrong match auto-posted Fees
+// records, they are LISTED and removed only with explicit consent —
+// otherwise the wrong ₹ would keep sitting on the wrong unit's grid.
+function bankUnmatch(txnId, confirmRemovePosted) {
+  doPostWithHistoryConfirm('bank.unmatch', bankAcct({ txn_id: txnId, confirm_remove_posted: confirmRemovePosted === true }),
+    function(r) {
+      if (r && r.success && r.data && r.data.needs_confirm) {
+        var lines = r.data.records.map(function(p) { return '  • ' + p.unit_id + ' ' + p.payment_type + ' ' + p.month + ' — ₹' + Number(p.amount).toLocaleString('en-IN'); }).join('\n');
+        var ok = confirm('This match auto-posted the following Fees Received record(s). Unmatching removes them too — otherwise the amount keeps sitting on the WRONG unit:\n\n' + lines + '\n\nRemove them and unmatch?');
+        if (!ok) return;
+        bankUnmatch(txnId, true);
+        return;
+      }
+      if (!r || !r.success) { showToast((r && r.error) || 'Failed', 'error'); return; }
+      showToast('Unmatched' + (r.data.postedRemoved ? ' — ' + r.data.postedRemoved + ' wrongly posted record(s) removed' : '') + '. The transaction is back to Unmatched.', 'success');
+      closeModalForce();
+      bankLoadTxns();
+    },
+    function(e) { showToast('Error: ' + e, 'error'); });
+}
+
+function bankOpenMatch(txnId, name, unitHint, curType, curPay) {
+  openModal(
+    '<div class="modal-header"><span class="modal-title">🔗 Match Transaction</span>'+
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div style="background:var(--bg-surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;">'+
+        '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">Bank narration name</div>'+
+        '<div style="font-weight:700;font-size:17px;">'+bankE(name||'Unknown')+'</div>'+
+      '</div>'+
+      '<div style="margin-bottom:16px;">'+
+        '<button class="btn btn-xs btn-outline" onclick="bankShowMatchDebug(\''+bankE(name||'')+'\')">🔍 Why didn\'t this match automatically?</button>'+
+        '<div id="bm-debug" style="margin-top:8px;"></div>'+
+      '</div>'+
+      '<div class="form-row">'+
+        '<div class="form-group"><label>Payment Type</label>'+
+          '<select id="bm-pay">'+
+            ['Maintenance','Waste Management','LPG','Caution Deposit','Party Hall Rental','Bank Interest','Miscellaneous','Unknown'].map(function(v){
+              return '<option value="'+v+'"'+(v===curPay?' selected':'')+'>'+v+'</option>';
+            }).join('')+
+          '</select></div>'+
+      '</div>'+
+      '<div class="form-group"><label>Search</label>'+
+        '<input type="text" id="bm-q" placeholder="Name or unit — checks Owners and Tenants together" oninput="bankPopList()"></div>'+
+      '<div class="form-group"><label>Select Person</label>'+
+        '<select id="bm-list" size="6" style="height:130px;font-size:13px;"><option>Loading…</option></select></div>'+
+      '<div class="form-group"><label>Unit ID</label>'+
+        '<input type="text" id="bm-unit" value="'+bankE(unitHint||'')+'" style="text-transform:uppercase" placeholder="e.g. A302"></div>'+
+      '<div class="form-actions">'+
+        ((unitHint||curType==='owner'||curType==='tenant') ? '<button class="btn btn-outline" style="color:var(--c-rejected-fg);margin-right:auto;" onclick="bankUnmatch(\''+bankE(txnId)+'\')" title="Clear this match completely — the transaction returns to Unmatched for a correct re-match">⛓️‍💥 Unmatch</button>' : '')+
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>'+
+        '<button class="btn btn-accent" onclick="bankSaveMatch(\''+bankE(txnId)+'\')">💾 Save Match</button>'+
+      '</div>'+
+    '</div>'
+  );
+  bankPopList();
+}
+
+function bankShowMatchDebug(name) {
+  var el = document.getElementById('bm-debug');
+  if (!el) return;
+  el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">Checking…</div>';
+  google.script.run.withSuccessHandler(function(r) {
+    var d = (r && r.success && r.data) ? r.data : null;
+    if (!d) { el.innerHTML = '<div style="color:var(--c-rejected-fg);font-size:12px;">Could not run diagnostic.</div>'; return; }
+    var h = '<div style="border:1px solid var(--border-strong,var(--border));border-radius:8px;padding:10px;font-size:12px;">' +
+      '<div style="margin-bottom:6px;">Extracted from bank narration: <strong>"' + bankE(d.extracted_name) + '"</strong> → normalized: <strong>"' + bankE(d.normalized) + '"</strong></div>' +
+      '<div style="margin-bottom:8px;color:var(--text-muted);">A match needs a score of <strong>' + d.threshold + '</strong> or higher. Closest candidates:</div>' +
+      '<table style="width:100%;border-collapse:collapse;"><thead><tr>' +
+      '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--border);">Unit</th>' +
+      '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--border);">Name on File</th>' +
+      '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--border);">Type</th>' +
+      '<th style="text-align:right;padding:4px 6px;border-bottom:1px solid var(--border);">Score</th></tr></thead><tbody>';
+    if (!d.candidates.length) {
+      h += '<tr><td colspan="4" style="padding:8px;color:var(--text-muted);">No owners or tenants found to compare against.</td></tr>';
+    }
+    d.candidates.forEach(function(c) {
+      var passed = c.best_score >= d.threshold;
+      h += '<tr style="' + (passed ? 'background:rgba(16,185,129,.08);' : '') + '">' +
+        '<td style="padding:4px 6px;">' + bankE(c.unit_id) + '</td>' +
+        '<td style="padding:4px 6px;">' + bankE(c.name) + (c.matched_alias ? '<div style="font-size:10px;color:var(--text-muted);">alias: "' + bankE(c.matched_alias) + '"</div>' : '') + '</td>' +
+        '<td style="padding:4px 6px;">' + (c.type === 'owner' ? '👤 Owner' : '🏠 Tenant') + '</td>' +
+        '<td style="text-align:right;padding:4px 6px;font-weight:700;color:' + (passed ? 'var(--c-verified-fg)' : 'var(--text-muted)') + '">' + c.best_score + '</td></tr>';
+    });
+    h += '</tbody></table>' +
+      '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);">If the right person is here with a score below ' + d.threshold + ', add their exact bank-statement spelling to their "Name on Bank Statement" field in Owners/Tenants — that becomes a 100-point exact match next time.</div>' +
+      '</div>';
+    el.innerHTML = h;
+  }).withFailureHandler(function(e) { el.innerHTML = '<div style="color:var(--c-rejected-fg);font-size:12px;">Error: ' + e + '</div>'; })
+    .doPost_internal('bank.debugMatch', bankAcct({ name: name, unit_id: '' }));
+}
+
+function bankPopList() {
+  var q    = document.getElementById('bm-q');
+  var sel  = document.getElementById('bm-list');
+  if (!sel) return;
+  var qv = q ? q.value.toLowerCase() : '';
+
+  function render() {
+    var combined = (bankMc.owners || []).map(function(p) { return { p: p, type: 'owner' }; })
+      .concat((bankMc.tenants || []).map(function(p) { return { p: p, type: 'tenant' }; }));
+    var f = combined.filter(function(entry) {
+      var p = entry.p;
+      return !qv || (p.name || '').toLowerCase().indexOf(qv) > -1 || (p.unit_id || '').toLowerCase().indexOf(qv) > -1;
+    });
+    // Units with both an owner and a resident are common (owner_is_tenant),
+    // so sort by unit to keep same-unit entries together and easy to compare.
+    f.sort(function(a, b) { return (a.p.unit_id || '') < (b.p.unit_id || '') ? -1 : 1; });
+    sel.innerHTML = f.length ? f.map(function(entry) {
+      var p = entry.p;
+      var icon = entry.type === 'owner' ? '👤' : '🏠';
+      return '<option value="' + bankE(p.owner_id || p.tenant_id || '') + '" data-type="' + entry.type + '" data-u="' + bankE(p.unit_id || '') + '" data-n="' + bankE(p.name || '') + '">' +
+        icon + ' ' + p.name + '  (' + (p.unit_id || '?') + (entry.type === 'owner' ? ' · Owner' : ' · Tenant') + ')</option>';
+    }).join('') : '<option value="">No results</option>';
+    sel.onchange = function() {
+      var o = sel.options[sel.selectedIndex];
+      var u = document.getElementById('bm-unit');
+      if (o && o.getAttribute('data-u') && u && !u.value) u.value = o.getAttribute('data-u');
+    };
+  }
+
+  var need = (!bankMc.owners ? 1 : 0) + (!bankMc.tenants ? 1 : 0);
+  if (need === 0) { render(); return; }
+  sel.innerHTML = '<option>Loading…</option>';
+  var done = 0;
+  function checkDone() { done++; if (done >= need) render(); }
+  if (!bankMc.owners) {
+    google.script.run.withSuccessHandler(function(r) { bankMc.owners = (r && r.data) || []; checkDone(); })
+      .withFailureHandler(function() { bankMc.owners = []; checkDone(); })
+      .doPost_internal('owners.getAll', {});
+  }
+  if (!bankMc.tenants) {
+    google.script.run.withSuccessHandler(function(r) { bankMc.tenants = (r && r.data) || []; checkDone(); })
+      .withFailureHandler(function() { bankMc.tenants = []; checkDone(); })
+      .doPost_internal('tenants.getAll', {});
+  }
+}
+
+function bankSaveMatch(txnId) {
+  var list=document.getElementById('bm-list');
+  var pay =document.getElementById('bm-pay');
+  var unit=document.getElementById('bm-unit');
+  if(!list||!list.options[list.selectedIndex]||!list.options[list.selectedIndex].value){
+    showToast('Please select a person','error');return;
+  }
+  var opt=list.options[list.selectedIndex];
+  doPostWithHistoryConfirm('bank.manualMatch', bankAcct({
+      txn_id:      txnId,
+      match_type:  opt.getAttribute('data-type')||'owner',
+      match_id:    opt.value,
+      match_name:  opt.getAttribute('data-n')||'',
+      match_unit:  unit?unit.value.trim().toUpperCase():'',
+      payment_type:pay?pay.value:'Unknown'
+    }),
+    function(res){
+      if(res&&res.success){
+        showToast('Matched!'+((res.data&&res.data.paymentsCreated)?' Payment posted to ledger.':''),'success');
+        closeModalForce();
+        bankMc={owners:null,tenants:null};
+        bankLoadTxns();bankLoadStats();
+      } else { showToast((res&&res.error)||'Failed','error'); }
+    },
+    function(e){showToast('Error: '+e,'error');}
+  );
+}
+
+function bankAutoCategorize() {
+  showToast('Learning from your existing categories…', '');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      var d = res && res.data;
+      if (!d) { showToast('Failed', 'error'); return; }
+      var msg = 'Applied to ' + d.applied + ' payment(s), from ' + d.patternsLearned + ' learned pattern(s)';
+      showToast(msg, 'success');
+      if (d.examples && d.examples.length) console.log('Auto-categorized examples:', d.examples);
+      bankLoadTxns(); bankLoadStats();
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('bank.autoCategorizeExpenses', bankAcct({}));
+}
+
+function bankRunRematch() {
+  showToast('Re-running matching…','');
+  google.script.run
+    .withSuccessHandler(function(res){
+      var d = res && res.data;
+      var msg = 'Newly matched: '+((d&&d.updated)||0)+' · Queued for posting: '+((d&&d.queuedForPosting)||0)+' · Payments posted: '+((d&&d.paymentsCreated)||0);
+      if (d && d.postError) { showToast(msg + ' · ⚠️ Posting error: ' + d.postError, 'error'); }
+      else { showToast(msg, 'success'); }
+      bankLoadTxns();bankLoadStats();
+    })
+    .withFailureHandler(function(e){showToast('Error: '+e,'error');})
+    .doPost_internal('bank.rematch', bankAcct({}));
+}
+
+function bankE(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Called by Index.html navigateTo() — NOT at top level
+function bankPageInit() {
+  bankLoadDebitCats();
+  bankSetDir('credit');
+  bankLoadTxns();
+}
+</script>

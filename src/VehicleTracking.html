@@ -1,0 +1,117 @@
+<!-- VehicleTracking.html — vehicle register for the whole facility.
+
+     PRIMARY SOURCE: the internal registry — every vehicle recorded on
+     owner and tenant records (the same data shown on each Unit's Full
+     Profile). This updates the moment a profile changes; no form
+     submission needed. The Vehicle Tracking Google Form predates
+     move-in vehicle collection, so the registry on file is the more
+     complete, current source — the form's responses remain available
+     as a secondary tab for anything submitted through it. -->
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">🚗 Vehicle Tracking</h1>
+    <p class="page-subtitle">Every vehicle on record, one row per vehicle — live from owner and tenant records, so it updates as Unit Profiles change</p>
+    <div style="display:flex;gap:6px;margin-top:8px;">
+      <button class="btn btn-sm" id="veh-tab-registry" onclick="vehSwitchTab('registry')">🗂️ Registry (from Unit Profiles)</button>
+      <button class="btn btn-sm btn-outline" id="veh-tab-form" onclick="vehSwitchTab('form')" title="Responses submitted through the Google Form">📋 Form Responses</button>
+    </div>
+  </div>
+  <button class="btn btn-outline btn-sm" onclick="window.open(formsConfig.vehicle.formUrl, '_blank')">🔗 Open the Form</button>
+  <button class="btn btn-outline btn-sm" onclick="vehRefresh()">🔄 Refresh</button>
+</div>
+
+<div class="card" id="veh-registry-view">
+  <div class="card-body">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+      <input id="veh-reg-search" type="text" placeholder="🔍 Search by unit, name, registration, make…" oninput="vehRenderRegistry()" style="flex:1;min-width:220px;padding:8px 12px;font-size:13px;">
+      <span id="veh-reg-count" style="font-size:12px;color:var(--text-muted);white-space:nowrap;"></span>
+    </div>
+    <div id="veh-registry-body"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<div class="card" id="veh-form-view" style="display:none;">
+  <div class="card-body">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+      <input id="forms-vehicle-search" type="text" placeholder="🔍 Search responses…" oninput="formsFilter('vehicle')" style="flex:1;min-width:220px;padding:8px 12px;font-size:13px;">
+      <span id="forms-vehicle-count" style="font-size:12px;color:var(--text-muted);white-space:nowrap;"></span>
+    </div>
+    <div id="forms-vehicle-body"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<script>
+var vehTab = 'registry';
+var vehRegistryData = null;
+
+function vehSwitchTab(tab) {
+  vehTab = tab;
+  var tReg = document.getElementById('veh-tab-registry');
+  var tForm = document.getElementById('veh-tab-form');
+  if (tReg) tReg.className = 'btn btn-sm' + (tab === 'registry' ? '' : ' btn-outline');
+  if (tForm) tForm.className = 'btn btn-sm' + (tab === 'form' ? '' : ' btn-outline');
+  document.getElementById('veh-registry-view').style.display = tab === 'registry' ? '' : 'none';
+  document.getElementById('veh-form-view').style.display = tab === 'form' ? '' : 'none';
+  if (tab === 'form' && !formsData['vehicle']) formsLoad('vehicle');
+  if (tab === 'registry' && !vehRegistryData) vehLoadRegistry();
+}
+
+function vehRefresh() {
+  if (vehTab === 'registry') vehLoadRegistry(true);
+  else formsLoad('vehicle', true);
+}
+
+function vehLoadRegistry(isManualRefresh) {
+  var body = document.getElementById('veh-registry-body');
+  if (body && (isManualRefresh || !vehRegistryData)) body.innerHTML = loadingHtml('Reading owner and tenant records…');
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:14px;">Error: ' + formsE(r ? r.error : 'failed') + '</div>'; return; }
+    vehRegistryData = r.data;
+    vehRenderRegistry();
+  }).withFailureHandler(function(e) {
+    if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:14px;">Error: ' + formsE(e) + '</div>';
+  }).doPost_internal('forms.getVehicleRegistry', {});
+}
+
+function vehRenderRegistry() {
+  var d = vehRegistryData;
+  var body = document.getElementById('veh-registry-body');
+  var countEl = document.getElementById('veh-reg-count');
+  if (!body || !d) return;
+
+  var q = String((document.getElementById('veh-reg-search') || {}).value || '').toLowerCase().trim();
+  var list = d.vehicles;
+  if (q) list = list.filter(function(v) {
+    return (v.unit_id + ' ' + v.name + ' ' + v.reg + ' ' + v.make + ' ' + v.model + ' ' + v.colour + ' ' + v.who + ' ' + v.wheels).toLowerCase().indexOf(q) > -1;
+  });
+
+  var c4 = 0, c2 = 0, unitSet = {};
+  d.vehicles.forEach(function(v) { unitSet[v.unit_id] = true; if (v.wheels === '4-Wheeler') c4++; else c2++; });
+  if (countEl) countEl.textContent = list.length + ' of ' + d.count + ' vehicles · ' + c4 + ' four-wheelers · ' + c2 + ' two-wheelers · ' + Object.keys(unitSet).length + ' units';
+
+  if (!d.count) { body.innerHTML = '<div style="color:var(--text-muted);padding:14px;">No vehicles on record yet. Vehicles are added on each unit\'s owner/tenant records (Unit Full Profile).</div>'; return; }
+  if (!list.length) { body.innerHTML = '<div style="color:var(--text-muted);padding:14px;">No vehicles match your search.</div>'; return; }
+
+  var h = '<div class="table-wrap" style="max-height:70vh;overflow:auto;"><table class="forms-table" style="min-width:820px;"><thead><tr>' +
+    '<th style="width:44px;">#</th><th>Unit</th><th>Belongs To</th><th>Owner / Tenant</th><th>Type</th><th>Registration No.</th><th>Make</th><th>Model</th><th>Colour</th>' +
+    '</tr></thead><tbody>';
+  list.forEach(function(v, i) {
+    h += '<tr>' +
+      '<td style="font-weight:700;color:var(--text-muted);">' + (i + 1) + '</td>' +
+      '<td style="font-weight:700;cursor:pointer;text-decoration:underline;color:var(--accent);" title="Open Unit Profile" onclick="openUnitProfile(\'' + formsE(v.unit_id) + '\')">' + formsE(v.unit_id) + '</td>' +
+      '<td>' + formsE(v.name) + '</td>' +
+      '<td>' + (v.who === 'Owner' ? '🏠 Owner' : '👤 Tenant') + '</td>' +
+      '<td>' + (v.wheels === '4-Wheeler' ? '🚗 4-Wheeler' : '🛵 2-Wheeler') + '</td>' +
+      '<td style="font-weight:600;">' + formsE(v.reg) + '</td>' +
+      '<td>' + formsE(v.make) + '</td>' +
+      '<td>' + formsE(v.model) + '</td>' +
+      '<td>' + formsE(v.colour) + '</td>' +
+    '</tr>';
+  });
+  h += '</tbody></table></div>';
+  body.innerHTML = h;
+}
+
+function vehiclePageInit() { vehLoadRegistry(); }
+</script>

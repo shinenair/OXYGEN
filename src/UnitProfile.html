@@ -1,0 +1,1757 @@
+<!-- UnitProfile.html — Full Unit Profile Modal Content -->
+<!-- Rendered inside the global modal via openUnitProfile(unitId) -->
+
+<style>
+  /* On phones, let the profile modal use nearly the full screen width
+     instead of the fixed 900px cap set for desktop — the !important is
+     needed because that cap is applied as an inline style from JS,
+     which normally wins over any plain CSS rule. */
+  @media (max-width: 480px) {
+    #modal-box { max-width: 96vw !important; width: 96vw !important; }
+    .up-detail-grid { grid-template-columns: 1fr !important; }
+  }
+
+  /* Reusable technique: any table given class="up-resp-table" collapses
+     from a normal grid of columns into a stacked list of small cards on
+     narrow screens — each row becomes one card, each cell becomes a
+     labeled line (the label comes from that cell's own data-label
+     attribute) instead of a column you have to scroll sideways to read. */
+  @media (max-width: 560px) {
+    .up-resp-table thead { display:none; }
+    .up-resp-table, .up-resp-table tbody, .up-resp-table tr, .up-resp-table td { display:block; width:100%; }
+    .up-resp-table tr {
+      border:1px solid var(--border,rgba(128,128,128,.25)); border-radius:8px;
+      margin-bottom:8px; padding:4px 0; background:var(--bg-surface2);
+    }
+    .up-resp-table td {
+      text-align:right !important; padding:5px 10px !important;
+      border:none !important; position:relative; padding-left:46% !important;
+      min-height:20px;
+    }
+    .up-resp-table td[data-label]::before {
+      content:attr(data-label); position:absolute; left:10px; top:5px;
+      font-weight:700; text-align:left; color:var(--text-muted); font-size:11px;
+    }
+    .up-resp-table td:empty, .up-resp-table td[data-label=""] { display:none; }
+    .up-resp-table tfoot tr { background:var(--bg-surface2); border-top:2px solid var(--border,rgba(128,128,128,.25)); }
+  }
+</style>
+
+<script>
+// ── Unit Profile Viewer ───────────────────────────────────────
+// Called from Units.html View button — opens a full-screen style modal
+// with all owner + tenant details matching the template format.
+
+// Module-level state for the All-Payments filter panel
+var upPayAll  = [];
+var upPayUnit = '';
+
+// Colour per payment type (matches the Transaction Ledger palette)
+var UP_TYPE_COLORS = {
+  'Maintenance':       { bg:'rgba(59,130,246,.16)',  fg:'#3b82f6' },
+  'Waste Management':  { bg:'rgba(16,185,129,.16)',  fg:'#10b981' },
+  'LPG':               { bg:'rgba(245,158,11,.18)',  fg:'#f59e0b' },
+  'Caution Deposit':   { bg:'rgba(20,184,166,.16)',  fg:'#14b8a6' },
+  'Party Hall Rental': { bg:'rgba(236,72,153,.16)',  fg:'#ec4899' },
+  'Bank Interest':     { bg:'rgba(168,85,247,.16)',  fg:'#a855f7' },
+  'Miscellaneous':     { bg:'rgba(100,116,139,.20)', fg:'#64748b' }
+};
+var UP_TYPE_LABELS = {
+  'Maintenance':'Maintenance Fee', 'Waste Management':'Waste Management Fee',
+  'LPG':'LPG', 'Caution Deposit':'Caution Deposit',
+  'Party Hall Rental':'Party Hall Rental', 'Bank Interest':'Bank Interest',
+  'Miscellaneous':'Miscellaneous'
+};
+function upTypeColor(v){ return UP_TYPE_COLORS[v] || { bg:'rgba(100,116,139,.18)', fg:'var(--text-muted)' }; }
+function upTypeLabel(v){ return UP_TYPE_LABELS[v] || v || '—'; }
+
+// Parse { year, month } from a bank date string (ISO, DD-Mon-YYYY, or numeric).
+var UP_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function upParseYM(d) {
+  if (!d) return null;
+  var s = String(d).trim(), low = s.toLowerCase();
+  var mn = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  var iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return { year:parseInt(iso[1],10), month:parseInt(iso[2],10) };
+  var nm = low.match(/(\d{1,2})[-\/ ]([a-z]{3})[a-z]*[-\/ ](\d{2,4})/);
+  if (nm && mn[nm[2]]) { var y=parseInt(nm[3],10); if(y<100)y+=2000; return {year:y, month:mn[nm[2]]}; }
+  var num = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
+  if (num) { var yy=parseInt(num[3],10); if(yy<100)yy+=2000; var a=parseInt(num[1],10),b=parseInt(num[2],10); var m=b; if(b>12&&a<=12)m=a; return {year:yy, month:m}; }
+  var ym = s.match(/(20\d{2})/);
+  if (ym) { var mm=0; for(var k in mn){ if(low.indexOf(k)>-1){mm=mn[k];break;} } return {year:parseInt(ym[1],10), month:mm}; }
+  return null;
+}
+// The amount a resident actually paid = the credit on the bank line.
+function upTxnAmount(t){ return Number(t.credit||0) > 0 ? Number(t.credit) : Number(t.debit||0); }
+
+// Coerce any stored date (ISO, DD/MM/YYYY, DD-Mon-YYYY) to YYYY-MM-DD so an
+// <input type="date"> calendar can prefill it. Returns '' if unparseable.
+function toDateInput(val) {
+  if (!val) return '';
+  var s = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  var ym = upParseYM(s);   // handles DD-Mon-YYYY and numeric forms
+  if (ym && ym.year && ym.month) {
+    var day = 1;
+    var dm = s.match(/^(\d{1,2})[-\/ ]/);
+    if (dm) day = parseInt(dm[1], 10);
+    var mm = ym.month < 10 ? '0' + ym.month : String(ym.month);
+    var dd = day < 10 ? '0' + day : String(day);
+    return ym.year + '-' + mm + '-' + dd;
+  }
+  var d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    var mo = d.getMonth() + 1, da = d.getDate();
+    return d.getFullYear() + '-' + (mo<10?'0'+mo:mo) + '-' + (da<10?'0'+da:da);
+  }
+  return '';
+}
+
+function openUnitProfile(unitId) {
+  // Open modal immediately with loading state
+  openModal(
+    '<div class="modal-header" style="position:sticky;top:0;z-index:10;background:var(--bg-surface);">' +
+      '<span class="modal-title">🏢 Unit ' + unitId + ' — Full Profile</span>' +
+      '<button class="modal-close" onclick="closeModalForce()">✕</button>' +
+    '</div>' +
+    '<div class="modal-body" id="uprf-body">' +
+      '<div class="loading"><div class="spinner"></div> Loading unit profile…</div>' +
+    '</div>'
+  );
+
+  // Expand modal to nearly full screen
+  var box = document.getElementById('modal-box');
+  if (box) {
+    box.style.maxWidth  = '900px';
+    box.style.width     = '96vw';
+    box.style.maxHeight = '92vh';
+  }
+
+  // One bundled server call instead of five separate round trips — much
+  // faster to open. Unit data comes fresh from the server every time.
+  var unitFallback = (typeof allUnits !== 'undefined' ? allUnits : []).find(function(u) { return u.unit_id === unitId; }) || { unit_id: unitId, tower: unitId[0], floor: unitId[1], status: '—' };
+  google.script.run
+    .withSuccessHandler(function(r) {
+      var d = (r && r.success && r.data) ? r.data : {};
+      renderProfile(unitId,
+        d.unit     || unitFallback,
+        d.owners   || [],
+        d.tenants  || [],
+        d.payments || [],
+        d.bank     || []);
+    })
+    .withFailureHandler(function(e) {
+      var body = document.getElementById('uprf-body');
+      if (body) body.innerHTML = '<div style="color:var(--c-rejected-fg);padding:20px;">Failed to load profile: ' + e + '<br><br><button class="btn btn-sm btn-outline" onclick="openUnitProfile(\'' + unitId + '\')">Retry</button></div>';
+    })
+    .doPost_internal('units.profile', { unit_id: unitId });
+}
+
+function renderProfile(unitId, unit, owners, tenants, payments, bankTxns) {
+  var body = document.getElementById('uprf-body');
+  if (!body) return;
+
+  // The All-Payments list is driven by actual bank transactions matched to
+  // this unit; the MF/WMF/LPG grids continue to use the fees ledger.
+  upPayAll  = bankTxns || [];
+  upPayUnit = unitId;
+
+  var towerName = (unit.tower === 'A') ? 'Tower One (A)' : 'Tower Two (B)';
+  var html = '';
+
+  // ── Unit Header — banner coloured by occupancy ───────────────
+  var occ   = unit.occupancy    || 'Occupied';
+  var reg   = unit.registration || 'Registered';
+  var isOcc = occ === 'Occupied';
+  var isReg = reg === 'Registered';
+  var bannerBg = isOcc
+    ? 'linear-gradient(135deg,#0b5e46,#0f7a5a)'   // green: occupied
+    : 'linear-gradient(135deg,#7a1f2b,#9b2c3a)';  // red: unoccupied
+  var occPill = isOcc
+    ? '<span class="pill" style="background:rgba(255,255,255,.18);color:#c8ffe9;font-weight:700;">Occupied</span>'
+    : '<span class="pill" style="background:rgba(0,0,0,.25);color:#ffd7dc;font-weight:700;">Unoccupied (UO)</span>';
+
+  // Not-registered → red tint; MF is still applicable, paid as a lump sum at
+  // registration along with the Corpus Fund.
+  if (!isReg) {
+    html += '<div style="background:var(--c-rejected-bg);border:1.5px solid var(--c-rejected-fg);color:var(--c-rejected-fg);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:14px;font-size:13px;font-weight:600;">⚠️ NOT-REGISTERED UNIT — MF is paid as a lump sum at registration, along with the Corpus Fund.</div>';
+  }
+
+  html +=
+    '<div style="display:flex;align-items:center;gap:16px;padding:16px 20px;background:' + bannerBg + ';border-radius:var(--radius-md);margin-bottom:20px;' + (!isReg ? 'box-shadow:inset 0 0 0 2px rgba(255,80,90,.55);' : '') + '">' +
+      (function() {
+        var pic = owners.length && owners[0].profile_picture ? owners[0].profile_picture : '';
+        if (pic) {
+          return '<img src="' + _e(_upPhotoUrl(pic)) + '" ' +
+            'onclick="upShowBigPhoto(\'' + _e(pic) + '\',\'' + _e(unitId) + '\')" ' +
+            'onerror="this.outerHTML=\'<div style=&quot;background:rgba(255,255,255,.16);color:#fff;border-radius:12px;width:96px;height:96px;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;&quot;>' + unitId + '</div>\'" ' +
+            'style="width:96px;height:96px;border-radius:14px;object-fit:cover;flex-shrink:0;cursor:zoom-in;border:2px solid rgba(255,255,255,.45);" ' +
+            'title="Click to view full size">';
+        }
+        return '<div style="background:rgba(255,255,255,.16);color:#fff;border-radius:12px;width:96px;height:96px;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:22px;font-weight:700;flex-shrink:0;">' + unitId + '</div>';
+      })() +
+      '<div style="flex:1;">' +
+        '<div style="font-family:var(--font-display);font-size:22px;font-weight:700;color:#fff;">' + unitId + '</div>' +
+        '<div style="color:rgba(255,255,255,.7);font-size:13px;">' + towerName + ' · Floor ' + (unit.floor||'—') + '</div>' +
+        (owners.length && owners[0].name
+          ? '<div style="color:#fff;font-size:15px;font-weight:700;margin-top:4px;">👤 ' + _e(owners[0].name) + (owners[0].name2 ? ' & ' + _e(owners[0].name2) : '') + '</div>'
+          : '') +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">' + occPill +
+        (!isReg ? '<span class="pill" style="background:rgba(0,0,0,.3);color:#ffb3bb;font-weight:700;">Not-registered</span>' : '') +
+      '</div>' +
+    '</div>';
+
+  // ── Unit Flags: occupancy + registration + corpus (editable) ──
+  var corpusPaid = (unit.corpus_paid || 'No') === 'Yes';
+  var lpgMode = unit.lpg_mode || 'Using';
+  var corpusAmt  = unit.corpus_amount || '10000';
+  html +=
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-bottom:20px;">' +
+      '<div style="background:var(--bg-surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">' +
+        '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:6px;">Occupancy</div>' +
+        '<select id="up-flag-occ" onchange="upSaveFlags(\'' + _e(unitId) + '\')" style="width:100%;padding:6px 10px;font-size:13px;">' +
+          '<option value="Occupied"'   + (isOcc ? ' selected' : '') + '>Occupied</option>' +
+          '<option value="Unoccupied"' + (!isOcc ? ' selected' : '') + '>Unoccupied (UO)</option>' +
+        '</select>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">' + (isOcc ? 'WMF & LPG applicable.' : 'Unoccupied — Waste Management Fee & LPG not applicable.') + '</div>' +
+      '</div>' +
+      '<div style="background:var(--bg-surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">' +
+        '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:6px;">Registration</div>' +
+        '<select id="up-flag-reg" onchange="upSaveFlags(\'' + _e(unitId) + '\')" style="width:100%;padding:6px 10px;font-size:13px;">' +
+          '<option value="Registered"'     + (isReg ? ' selected' : '') + '>Registered</option>' +
+          '<option value="Not-registered"' + (!isReg ? ' selected' : '') + '>Not-registered</option>' +
+        '</select>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">' + (isReg ? 'Registered.' : 'MF paid as lump sum at registration, with Corpus Fund.') + '</div>' +
+      '</div>' +
+      '<div style="background:var(--bg-surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">' +
+        '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:6px;">Corpus Fund Paid</div>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<select id="up-flag-corpus" onchange="upSaveFlags(\'' + _e(unitId) + '\')" style="flex:1;padding:6px 10px;font-size:13px;">' +
+            '<option value="Yes"' + (corpusPaid ? ' selected' : '') + '>Yes</option>' +
+            '<option value="No"'  + (!corpusPaid ? ' selected' : '') + '>No</option>' +
+          '</select>' +
+          '<input id="up-flag-corpus-amt" type="number" value="' + _e(corpusAmt) + '" onchange="upSaveFlags(\'' + _e(unitId) + '\')" ' +
+            'style="width:96px;padding:6px 10px;font-size:13px;" title="Corpus Fund amount (₹)">' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">' + (corpusPaid ? '✓ Corpus Fund of ₹' + Number(corpusAmt).toLocaleString('en-IN') + ' paid.' : 'Corpus Fund of ₹' + Number(corpusAmt).toLocaleString('en-IN') + ' pending.') + '</div>' +
+      '</div>' +
+      '<div style="background:var(--bg-surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">' +
+        '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:6px;">🔥 LPG Mode</div>' +
+        '<select id="up-flag-lpg" onchange="upSaveFlags(\'' + _e(unitId) + '\')" style="width:100%;padding:6px 10px;font-size:13px;">' +
+          '<option value="Using"'        + (lpgMode === 'Using' ? ' selected' : '') + '>Using (piped LPG)</option>' +
+          '<option value="Own Cylinder"' + (lpgMode === 'Own Cylinder' ? ' selected' : '') + '>Own Cylinder</option>' +
+          '<option value="Not Using"'    + (lpgMode === 'Not Using' ? ' selected' : '') + '>Not Using</option>' +
+        '</select>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">' +
+          (lpgMode === 'Own Cylinder' ? 'Uses own cylinder — no meter reading or charge.'
+            : lpgMode === 'Not Using' ? 'Not using LPG — no meter reading or charge.'
+            : 'Billed monthly from the meter reading.') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  // ── Monthly Occupancy Timeline ──────────────────────────────
+
+  // ── Owners Section ───────────────────────────────────────────
+  html += '<div style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text-primary);margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid var(--accent);">👤 Owner Details</div>';
+
+  if (!owners.length) {
+    html += '<div style="margin-bottom:16px;padding:14px;background:var(--bg-surface2);border-radius:var(--radius-sm);text-align:center;">' +
+      '<div style="color:var(--text-muted);font-size:13px;margin-bottom:10px;">No owner on record for this unit.</div>' +
+      '<button class="btn btn-sm btn-primary" onclick="closeModalForce();setTimeout(function(){showAddOwnerModal(\'' + unitId + '\')},150);">+ Add Owner</button>' +
+      '</div>';
+  }
+
+  owners.forEach(function(o, idx) {
+    var v4w = _parseVehicles(o.vehicles_4w);
+    var v2w = _parseVehicles(o.vehicles_2w);
+
+    html += '<div style="background:var(--bg-surface2);border-radius:var(--radius-md);padding:18px;margin-bottom:16px;border:1px solid var(--border);">';
+
+    // Owner header: photo + names + pills
+    var avatar = o.profile_picture
+      ? '<img src="' + _e(_upPhotoUrl(o.profile_picture)) + '" onerror="this.style.display=\'none\'" ' +
+        'style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);flex-shrink:0;">'
+      : '<div style="background:var(--accent-dim);color:var(--accent);border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">O' + (idx+1) + '</div>';
+
+    var subNames = [];
+    if (o.name2) subNames.push(o.name2);
+    if (o.name3) subNames.push(o.name3);
+
+    html +=
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">' +
+        avatar +
+        '<div>' +
+          '<div style="font-weight:700;font-size:16px;">' + _e(o.name) +
+            (o.owner_id && !isNaN(parseInt(o.owner_id,10)) ? ' <span style="color:var(--text-muted);font-size:11px;font-weight:600">#' + _e(o.owner_id) + '</span>' : '') +
+          '</div>' +
+          (subNames.length ? '<div style="font-size:12px;color:var(--text-muted);">' + _e(subNames.join(' · ')) + '</div>' : '') +
+        '</div>' +
+        '<div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+          '<button class="btn btn-xs btn-outline" onclick="closeModalForce();setTimeout(function(){ownersOpenEditSafe(\'' + _e(o.owner_id) + '\')},150);">✏️ Edit</button>' +
+          '<button class="btn btn-xs btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="upArchiveOwner(\'' + _e(o.owner_id) + '\',\'' + _e(o.name) + '\',\'' + _e(unitId) + '\')" title="Archive this owner (unit sold) and clear the section">🗄 Archive</button>' +
+          (o.living_status ? '<span class="pill ' + (o.living_status==='Resident'?'pill-resident':'pill-non-resident') + '">' + _e(o.living_status) + '</span>' : '') +
+          (o.exec_member === 'Yes' ? '<span class="pill pill-maintenance" style="font-size:10px;">' + _e(o.exec_member_title||'Exec Member') + '</span>' : '') +
+        '</div>' +
+      '</div>';
+
+    // Two-column detail grid
+    html += '<div class="up-detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">';
+
+    var ownerRows = [
+      ['Phone 1',         o.phone],
+      ['Phone 2',         o.phone2],
+      ['Phone 3',         o.phone3],
+      ['Email',           o.email],
+      ['Email 2',         o.email2],
+      ['Car Parking',     o.car_parking_slot],
+      ['TC Number',       o.tc_number],
+      ['KSEB Consumer',   o.kseb_consumer_no],
+      ['Living Status',   o.living_status],
+      ['Residing Country',o.residing_country],
+      ['Address (India)', o.address_india || o.address],
+      ['Address (Abroad)',o.address_abroad],
+      ['Employer',        o.employer],
+      ['Designation',     o.work_designation],
+      ['Work Address',    o.work_address],
+      ['Vehicles Count',  (o.num_4w || o.num_2w) ? ((o.num_4w||0) + ' × 4W · ' + (o.num_2w||0) + ' × 2W') : ''],
+      ['Notes',           o.notes],
+    ];
+
+    ownerRows.forEach(function(r, i) {
+      var val = r[1];
+      if (!val) return;
+      html +=
+        '<div style="display:flex;border-bottom:1px solid var(--border);">' +
+          '<div style="min-width:130px;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);background:var(--bg-surface);border-right:1px solid var(--border);flex-shrink:0;">' + r[0] + '</div>' +
+          '<div style="padding:8px 12px;font-size:13px;color:var(--text-primary);word-break:break-word;">' + _e(val) + '</div>' +
+        '</div>';
+    });
+
+    html += '</div>'; // end grid
+
+    // Names on Bank Statement — chips
+    if (o.bank_names) {
+      html += '<div style="margin-top:14px;">' +
+        '<div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🏦 Names on Bank Statement</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        o.bank_names.split(',').map(function(b) {
+          var bn = b.trim();
+          return bn ? '<span style="background:var(--accent-dim);color:var(--accent);border-radius:20px;padding:3px 11px;font-size:12px;font-weight:600;">' + _e(bn) + '</span>' : '';
+        }).join('') +
+        '</div></div>';
+    }
+
+    // Payment history — from the central Payments ledger, merged with owner-sheet for the current year
+    var payMonths = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+    var payMap = {};
+    (payments || []).forEach(function(p) {
+      if (p.status === 'Verified') {
+        var k = p.payment_type + '|' + p.month;
+        // Multiple separate payments can legitimately exist for the same
+        // unit+type+month (e.g. two different bank transactions, each
+        // split and each contributing part of the same month's fee) —
+        // sum them, don't let a later one silently overwrite an earlier
+        // one's amount.
+        payMap[k] = (typeof payMap[k] === 'number' ? payMap[k] : 0) + Number(p.amount || 0);
+      }
+      else if (p.status === 'UO' && payMap[p.payment_type + '|' + p.month] === undefined) payMap[p.payment_type + '|' + p.month] = 'UO';
+    });
+    function upMonthPaid(type, y, mi) {
+      var mk  = y + '-' + (mi + 1 < 10 ? '0' + (mi + 1) : String(mi + 1));
+      var amt = payMap[type + '|' + mk];
+      return amt !== undefined ? amt : null;
+    }
+    function upYearGrids(type) {
+      // Current year down to 2023 — extends itself every new year, no code changes
+      var years = [];
+      for (var yy = (new Date()).getFullYear(); yy >= 2023; yy--) years.push(yy);
+      var g = '';
+      for (var yi = 0; yi < years.length; yi++) {
+        var y = years[yi];
+        g += '<div style="display:flex;align-items:center;gap:6px;margin:5px 0;flex-wrap:wrap;">' +
+          '<div style="min-width:44px;font-size:12px;font-weight:700;color:var(--text-secondary);">' + y + '</div>' +
+          '<div style="display:flex;gap:3px;flex-wrap:wrap;">';
+        for (var mi = 0; mi < 12; mi++) {
+          var amt = upMonthPaid(type, y, mi);
+          var cellCss, cellTitle, cellVal;
+          if (amt === 'UO') {
+            cellCss   = 'background:rgba(100,116,139,.18);color:#64748b;';
+            cellTitle = ': Unoccupied \u2014 not owed';
+            cellVal   = 'UO';
+          } else if (amt !== null) {
+            cellCss   = 'background:var(--c-verified-bg);color:var(--c-verified-fg);';
+            cellTitle = amt === 'PAID' ? ': paid' : ': \u20b9' + amt;
+            cellVal   = amt === 'PAID' ? '\u2713' : '\u20b9' + Number(amt).toLocaleString('en-IN');
+          } else {
+            cellCss   = 'background:var(--c-rejected-bg);color:var(--c-rejected-fg);opacity:.65;';
+            cellTitle = ': not paid';
+            cellVal   = '\u2014';
+          }
+          g += '<div style="min-width:44px;text-align:center;border-radius:6px;padding:4px 2px;font-size:9px;font-weight:700;' + cellCss + '" ' +
+            'title="' + payMonths[mi].toUpperCase() + ' ' + y + cellTitle + '">' +
+            payMonths[mi].toUpperCase() +
+            '<div style="font-size:9px;margin-top:1px;">' + cellVal + '</div>' +
+          '</div>';
+        }
+        g += '</div></div>';
+      }
+      return g;
+    }
+    var naTag = '<span style="background:var(--c-rejected-bg);color:var(--c-rejected-fg);border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:8px;text-transform:none;letter-spacing:0;">Not applicable</span>';
+    var lumpTag = '<span style="background:var(--c-pending-bg);color:var(--c-pending-fg);border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:8px;text-transform:none;letter-spacing:0;">Lump sum at registration</span>';
+    html += '<div style="margin-top:14px;">' +
+      '<div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">\ud83c\udfe0 Maintenance Fee \u2014 Payment History ('+(new Date()).getFullYear()+' \u2192 2023)' + (!isReg ? lumpTag : '') + '</div>' +
+      upYearGrids('Maintenance');
+    html += '<div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 6px;">\u267b\ufe0f Waste Management Fee' + (!isOcc ? naTag : '') + '</div>' +
+      (!isOcc ? '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Unit is Unoccupied \u2014 WMF is not applicable.</div>' : upYearGrids('Waste Management'));
+    html += '<div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 6px;">\ud83d\udd25 LPG' + (!isOcc ? naTag : '') + '</div>' +
+      (!isOcc ? '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Unit is Unoccupied \u2014 LPG is not applicable.</div>' : upYearGrids('LPG'));
+    html += '</div>';
+
+    // Vehicles
+    if (v4w.length || v2w.length) {
+      html += '<div style="margin-top:14px;">';
+      html += '<div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🚗 Vehicles</div>';
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+      v4w.forEach(function(v) {
+        if (!v.reg && !v.make) return;
+        html += '<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;font-size:12px;">' +
+          '<div style="font-weight:700;">' + _e(v.reg||'—') + '</div>' +
+          '<div style="color:var(--text-muted);">' + _e([v.make,v.model,v.colour].filter(Boolean).join(' · ')) + '</div>' +
+          '<div style="font-size:10px;color:var(--accent);">4-Wheeler</div>' +
+        '</div>';
+      });
+      v2w.forEach(function(v) {
+        if (!v.reg && !v.make) return;
+        html += '<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;font-size:12px;">' +
+          '<div style="font-weight:700;">' + _e(v.reg||'—') + '</div>' +
+          '<div style="color:var(--text-muted);">' + _e([v.make,v.model,v.colour].filter(Boolean).join(' · ')) + '</div>' +
+          '<div style="font-size:10px;color:var(--text-muted);">2-Wheeler</div>' +
+        '</div>';
+      });
+      html += '</div></div>';
+    }
+
+    html += '</div>'; // end owner card
+  });
+
+  // Owner history (hidden until requested)
+  html +=
+    '<div style="margin:-4px 0 20px;">' +
+      '<button class="btn btn-xs btn-outline" onclick="upToggleHistory(\'owner\',\'' + _e(unitId) + '\')" ' +
+        'id="up-hist-owner-btn" style="font-size:11px;">🕓 View Unit Owner History</button>' +
+      '<div id="up-hist-owner" style="display:none;margin-top:10px;"></div>' +
+    '</div>';
+
+  // ── Tenants / Residents Section ──────────────────────────────
+  html += '<div style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text-primary);margin:20px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--c-occupied-fg);">🏠 Resident Details</div>';
+
+  // Owner-is-Tenant flag: Yes = owner occupies the flat themselves (not rented)
+  var oit = unit.owner_is_tenant || '';
+  html +=
+    '<div style="display:flex;align-items:center;gap:10px;background:var(--bg-surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:14px;flex-wrap:wrap;">' +
+      '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);">Owner is the Resident?</div>' +
+      '<select id="up-flag-oit" onchange="upSaveFlags(\'' + _e(unitId) + '\')" style="padding:6px 10px;font-size:13px;">' +
+        '<option value=""'    + (oit === ''    ? ' selected' : '') + '>— Not set —</option>' +
+        '<option value="Yes"' + (oit === 'Yes' ? ' selected' : '') + '>Yes — owner lives here</option>' +
+        '<option value="No"'  + (oit === 'No'  ? ' selected' : '') + '>No — rented to a tenant</option>' +
+      '</select>' +
+      '<div style="font-size:11px;color:var(--text-muted);">' +
+        (oit === 'Yes' ? 'Owner lives here — 🧑‍🤝‍🧑 icon shown on the Units grid.'
+                       : (oit === 'No' ? 'Rented / owner elsewhere — no icon on the Units grid.' : 'Set this to control the 🧑‍🤝‍🧑 icon on the Units grid.')) +
+      '</div>' +
+    '</div>';
+
+  if (!tenants.length) {
+    html += '<div style="margin-bottom:16px;padding:14px;background:var(--bg-surface2);border-radius:var(--radius-sm);text-align:center;">' +
+      '<div style="color:var(--text-muted);font-size:13px;margin-bottom:10px;">No resident on record. Unit is Vacant.</div>' +
+      '<button class="btn btn-sm btn-primary" onclick="closeModalForce();setTimeout(function(){showAddTenantModal(\'' + unitId + '\')},150);">+ Add Resident</button>' +
+      '</div>';
+  }
+
+  tenants.forEach(function(t, idx) {
+    var v4w = _parseVehicles(t.vehicle_4w);
+    var v2w = _parseVehicles(t.vehicle_2w);
+    var totalOccupants = (parseInt(t.adults)||0) + (parseInt(t.kids)||0);
+
+    // Calculate residency duration if move_in_date present
+    var residency = '';
+    if (t.move_in_date) {
+      try {
+        var d   = new Date(t.move_in_date);
+        var now = new Date();
+        var y   = now.getFullYear() - d.getFullYear();
+        var m   = now.getMonth() - d.getMonth();
+        var dd  = now.getDate() - d.getDate();
+        if (dd < 0) { m--; dd += 30; }
+        if (m < 0)  { y--; m  += 12; }
+        residency = (y>0?y+'Y ':'')+( m>0?m+'M ':'')+dd+'D';
+      } catch(e) {}
+    }
+
+    html += '<div style="background:var(--bg-surface2);border-radius:var(--radius-md);padding:18px;margin-bottom:16px;border:1px solid var(--border);">';
+
+    // Tenant header
+    html +=
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">' +
+        '<div style="background:rgba(0,200,150,.15);color:var(--accent);border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">T' + (idx+1) + '</div>' +
+        '<div>' +
+          '<div style="font-weight:700;font-size:16px;">' + _e(t.name) + (t.name2 ? ' <span style="color:var(--text-muted);font-size:13px;">& ' + _e(t.name2) + '</span>' : '') + '</div>' +
+          (residency ? '<div style="font-size:11px;color:var(--text-muted);">Residency: ' + residency + '</div>' : '') +
+        '</div>' +
+        '<div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+          '<button class="btn btn-xs btn-outline" onclick="closeModalForce();setTimeout(function(){tenantsOpenEditSafe(\'' + _e(t.tenant_id) + '\')},150);">✏️ Edit</button>' +
+          '<button class="btn btn-xs btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="upArchiveTenant(\'' + _e(t.tenant_id) + '\',\'' + _e(t.name) + '\',\'' + _e(unitId) + '\')" title="Archive this resident (moved out) and clear the section">🗄 Archive</button>' +
+          (t.adults ? '<span class="pill" style="background:var(--c-resident-bg);color:var(--c-resident-fg);">👨 ' + t.adults + ' Adults</span>' : '') +
+          (t.kids   ? '<span class="pill" style="background:var(--c-pending-bg);color:var(--c-pending-fg);">👶 ' + t.kids + ' Kids</span>' : '') +
+        '</div>' +
+      '</div>';
+
+    // Detail grid
+    html += '<div class="up-detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:14px;">';
+
+    var tenantRows = [
+      ['Phone',           t.phone],
+      ['Phone 2',         t.phone2],
+      ['Email',           t.email],
+      ['Work',            t.work],
+      ['Move-in Date',    t.move_in_date ? formatDate(t.move_in_date) : ''],
+      ['Move-out Date',   t.move_out_date ? formatDate(t.move_out_date) : ''],
+      ['Address',         t.address],
+      ['WA Phone 1',      t.wa_phone1],
+      ['WA Phone 2',      t.wa_phone2],
+      ['Caution Deposit', t.caution_deposit + (t.caution_amount ? ' — ' + t.caution_amount : '')],
+      ['ID Proof',        t.id_proof],
+      ['WhatsApp Group',  t.whatsapp_group],
+      ['Vehicles Count',  (t.num_4w || t.num_2w) ? ((t.num_4w||0) + ' × 4W · ' + (t.num_2w||0) + ' × 2W') : ''],
+      ['Comment',         t.comment],
+    ];
+
+    tenantRows.forEach(function(r) {
+      var val = r[1];
+      if (!val || val === ' — ') return;
+      html +=
+        '<div style="display:flex;border-bottom:1px solid var(--border);">' +
+          '<div style="min-width:130px;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);background:var(--bg-surface);border-right:1px solid var(--border);flex-shrink:0;">' + r[0] + '</div>' +
+          '<div style="padding:8px 12px;font-size:13px;color:var(--text-primary);">' + _e(val) + '</div>' +
+        '</div>';
+    });
+
+    html += '</div>'; // end detail grid
+
+    // Names on Bank Statement — chips (consistent with the Owner section)
+    if (t.bank_name) {
+      html += '<div style="margin-top:14px;">' +
+        '<div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🏦 Names on Bank Statement</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        t.bank_name.split(',').map(function(b) {
+          var bn = b.trim();
+          return bn ? '<span style="background:var(--accent-dim);color:var(--accent);border-radius:20px;padding:3px 11px;font-size:12px;font-weight:600;">' + _e(bn) + '</span>' : '';
+        }).join('') +
+        '</div></div>';
+    }
+
+    // Vehicles
+    if (v4w.length || v2w.length) {
+      html += '<div><div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🚗 Vehicles</div>';
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+      v4w.concat(v2w).forEach(function(v, vi) {
+        if (!v.reg && !v.make) return;
+        html += '<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;font-size:12px;">' +
+          '<div style="font-weight:700;">' + _e(v.reg||'—') + '</div>' +
+          '<div style="color:var(--text-muted);">' + _e([v.make,v.model,v.colour].filter(Boolean).join(' · ')) + '</div>' +
+        '</div>';
+      });
+      html += '</div></div>';
+    }
+
+    html += '</div>'; // end tenant card
+  });
+
+  // Resident history (hidden until requested)
+  html +=
+    '<div style="margin:-4px 0 20px;">' +
+      '<button class="btn btn-xs btn-outline" onclick="upToggleHistory(\'tenant\',\'' + _e(unitId) + '\')" ' +
+        'id="up-hist-tenant-btn" style="font-size:11px;">🕓 View Resident History</button>' +
+      '<div id="up-hist-tenant" style="display:none;margin-top:10px;"></div>' +
+    '</div>';
+
+  // ── LPG Meter Reading History ──────────────────────────────────
+  if (lpgMode === 'Using') {
+    html +=
+      '<div style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text-primary);margin:20px 0 6px;padding-bottom:6px;border-bottom:2px solid #f59e0b;">🔥 LPG</div>' +
+      '<div style="margin-bottom:16px;">' +
+        '<button class="btn btn-xs btn-outline" onclick="upToggleLpgHistory(\'' + _e(unitId) + '\')" id="up-lpg-hist-btn" style="font-size:11px;">🔥 View LPG Reading History</button>' +
+        '<div id="up-lpg-history" style="display:none;margin-top:10px;"></div>' +
+      '</div>';
+  } else {
+    html +=
+      '<div style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text-primary);margin:20px 0 6px;padding-bottom:6px;border-bottom:2px solid #f59e0b;">🔥 LPG</div>' +
+      '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">' + (lpgMode === 'Own Cylinder' ? 'This unit uses its own cylinder — no meter billing.' : 'This unit is marked Not Using LPG — no meter billing.') + '</div>';
+  }
+
+  // ── Monthly Occupancy & LPG Mode Timeline ──
+  html += '<div id="up-timeline-wrap"></div>';
+
+  // ── Parked Funds (portions awaiting manual month allocation) ──
+  html += '<div id="up-parked-wrap"></div>';
+
+  // ── All Payments (actual bank transactions matched to this unit) ──
+  html += '<div style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text-primary);margin:20px 0 6px;padding-bottom:6px;border-bottom:2px solid var(--gold,#f59e0b);">💳 All Payments</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Pulled directly from the Transaction Ledger — actual bank credits matched to this unit.</div>';
+
+  if (upPayAll.length > 0) {
+    // Years present (newest first) from the actual transaction dates
+    var yrSet = {};
+    upPayAll.forEach(function(p){ var ym=upParseYM(p.date); if(ym&&ym.year) yrSet[ym.year]=true; });
+    yrSet[(new Date()).getFullYear()] = true;
+    var yrs = []; for (var yk in yrSet) yrs.push(parseInt(yk,10)); yrs.sort(function(a,b){return b-a;});
+    var yrOpts = '<option value="">All Years</option>';
+    yrs.forEach(function(y){ yrOpts += '<option value="'+y+'">'+y+'</option>'; });
+
+    // Types present in this unit's matched transactions
+    var tySet = {}; upPayAll.forEach(function(p){ if(p.payment_type && p.payment_type!=='Unknown') tySet[p.payment_type]=true; });
+    var tyOpts = '<option value="">All Types</option>';
+    for (var tk in tySet) tyOpts += '<option value="'+_e(tk)+'">'+_e(upTypeLabel(tk))+'</option>';
+
+    html +=
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">' +
+        '<select id="up-pay-year" onchange="upRenderPayments()" style="padding:6px 10px;font-size:12px;">' + yrOpts + '</select>' +
+        '<select id="up-pay-month" onchange="upRenderPayments()" style="padding:6px 10px;font-size:12px;">' +
+          '<option value="">All Months</option>' +
+          '<option value="1">January</option><option value="2">February</option>' +
+          '<option value="3">March</option><option value="4">April</option>' +
+          '<option value="5">May</option><option value="6">June</option>' +
+          '<option value="7">July</option><option value="8">August</option>' +
+          '<option value="9">September</option><option value="10">October</option>' +
+          '<option value="11">November</option><option value="12">December</option>' +
+        '</select>' +
+        '<select id="up-pay-type" onchange="upRenderPayments()" style="padding:6px 10px;font-size:12px;">' + tyOpts + '</select>' +
+      '</div>' +
+      '<div id="up-pay-rows"></div>';
+  } else {
+    html += '<div style="color:var(--text-muted);font-size:13px;padding:12px;background:var(--bg-surface2);border-radius:var(--radius-sm);">No bank transactions matched to this unit yet. Match credits to this unit on the Transaction Ledger page.</div>';
+  }
+
+  // ── Action Buttons ────────────────────────────────────────────
+  html +=
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;padding-top:16px;border-top:1px solid var(--border);margin-top:8px;">' +
+      '<button class="btn btn-outline btn-sm" onclick="closeModalForce()">Close</button>' +
+    '</div>';
+
+  body.innerHTML = html;
+  // Not-registered → soft red wash over the whole profile window
+  body.style.background   = !isReg ? 'rgba(220,60,80,.07)' : '';
+  body.style.borderRadius = !isReg ? 'var(--radius-md)' : '';
+  upRenderPayments();
+  upParkedLoad(unitId);
+  upTimelineLoad(unitId);
+}
+
+// Collapsed by default so opening a profile makes ONE server call, not
+// two — the reading history loads only when the person actually asks for it.
+function upToggleLpgHistory(unitId) {
+  var box = document.getElementById('up-lpg-history');
+  var btn = document.getElementById('up-lpg-hist-btn');
+  if (!box) return;
+  if (box.style.display !== 'none') {
+    box.style.display = 'none';
+    if (btn) btn.innerHTML = '🔥 View LPG Reading History';
+    return;
+  }
+  box.style.display = 'block';
+  if (btn) btn.innerHTML = '🔼 Hide LPG Reading History';
+  if (box.getAttribute('data-loaded') === '1') return; // already fetched once
+  box.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>';
+  upLoadLpgHistory(unitId);
+}
+
+var upLpgHistoryUnitId = null;
+var upLpgHistoryData = null;
+var upLpgHistoryYear = null;
+
+function upLoadLpgHistory(unitId) {
+  upLpgHistoryUnitId = unitId;
+  google.script.run.withSuccessHandler(function(r) {
+    var list = (r && r.success && r.data) ? r.data : [];
+    upLpgHistoryData = list;
+    var el = document.getElementById('up-lpg-history');
+    if (!el) return;
+    el.setAttribute('data-loaded', '1');
+    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px;background:var(--bg-surface2);border-radius:var(--radius-sm);">No LPG readings recorded yet.</div>'; return; }
+    if (!upLpgHistoryYear) upLpgHistoryYear = list[0].year; // newest year with data, by default
+    upRenderLpgHistory();
+  }).withFailureHandler(function() {
+    var el = document.getElementById('up-lpg-history');
+    if (el) el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">Could not load LPG history.</div>';
+  }).doPost_internal('lpg.getUnitHistory', { unit_id: unitId });
+}
+
+function upRenderLpgHistory() {
+  var el = document.getElementById('up-lpg-history');
+  if (!el || !upLpgHistoryData) return;
+  var mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  var years = [];
+  upLpgHistoryData.forEach(function(d) { if (years.indexOf(d.year) === -1) years.push(d.year); });
+  years.sort(function(a, b) { return b - a; });
+  var yearOpts = years.map(function(y) { return '<option value="' + y + '"' + (y === upLpgHistoryYear ? ' selected' : '') + '>' + y + '</option>'; }).join('');
+
+  var rows = upLpgHistoryData.filter(function(d) { return d.year === upLpgHistoryYear; }).sort(function(a, b) { return a.month - b.month; });
+
+  var h = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+    '<label style="font-size:11px;color:var(--text-muted);">Year</label>' +
+    '<select onchange="upLpgHistoryYear=Number(this.value);upRenderLpgHistory();" style="padding:4px 8px;font-size:12px;">' + yearOpts + '</select>' +
+    '<span style="font-size:10.5px;color:var(--text-muted);margin-left:6px;">"Paid" is looked up from next month\'s actual LPG payment — e.g. December\'s row shows what was paid in January.</span>' +
+  '</div>';
+
+  h += '<div class="table-wrap" style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;"><table class="up-resp-table" style="border-collapse:collapse;width:100%;font-size:12px;">' +
+    '<thead><tr style="background:var(--bg-surface2)">' +
+    '<th style="text-align:left;padding:6px 8px;">Month</th><th style="text-align:right;padding:6px 8px;">Prev</th>' +
+    '<th style="text-align:right;padding:6px 8px;">Curr</th><th style="text-align:right;padding:6px 8px;">Consumed</th>' +
+    '<th style="text-align:right;padding:6px 8px;">Calculated</th><th style="text-align:right;padding:6px 8px;">Paid</th>' +
+    '<th style="padding:6px 8px;">Payment Date</th>' +
+    '<th style="padding:6px 8px;">Status</th><th style="padding:6px 8px;"></th></tr></thead><tbody>';
+
+  var sumCalc = 0, sumPaid = 0;
+  rows.forEach(function(d) {
+    sumCalc += d.amount || 0;
+    sumPaid += d.live_paid_amount || 0;
+    var isMismatch = d.live_status === 'Mismatch';
+    var isUnpaid = d.live_status === 'Unpaid';
+    var statusHtml = isMismatch ? '<span style="color:#f59e0b;font-weight:700">⚠️ Mismatch</span>'
+      : d.live_status === 'Paid' ? '<span style="color:var(--c-verified-fg)">✓ Paid</span>'
+      : isUnpaid ? '<span style="color:var(--c-rejected-fg);font-weight:700">⛔ Unpaid</span>'
+      : '<span style="color:var(--text-muted)">Pending</span>';
+    h += '<tr style="border-top:1px solid var(--border);' + ((isMismatch || isUnpaid) ? 'background:rgba(245,158,11,.10);' : '') + '">' +
+      '<td data-label="Month" style="padding:6px 8px;font-weight:700">' + mn[d.month] + ' ' + d.year + '</td>' +
+      '<td data-label="Prev" style="text-align:right;padding:6px 8px;">' + d.previous_reading + '</td>' +
+      '<td data-label="Curr" style="text-align:right;padding:6px 8px;">' + d.current_reading + '</td>' +
+      '<td data-label="Consumed" style="text-align:right;padding:6px 8px;">' + d.consumed + '</td>' +
+      '<td data-label="Calculated" style="text-align:right;padding:6px 8px;font-weight:700">₹' + Math.round(d.amount).toLocaleString('en-IN') + '</td>' +
+      '<td data-label="Paid" style="text-align:right;padding:6px 8px;">' + (d.live_paid_amount !== null ? '₹' + Math.round(d.live_paid_amount).toLocaleString('en-IN') : '—') + '</td>' +
+      '<td data-label="Payment Date" style="padding:6px 8px;color:var(--text-muted);">' + (d.live_payment_date ? formatDate(d.live_payment_date) : '—') + '</td>' +
+      '<td data-label="Status" style="padding:6px 8px;">' + statusHtml + (d.flagged ? ' <span title="Flagged' + (d.flag_note ? ': ' + _e(d.flag_note) : '') + '" style="cursor:help;">🚩</span>' : '') + '</td>' +
+      '<td data-label="" style="padding:6px 8px;white-space:nowrap;">' +
+        (APP_ROLE === 'admin' ? '<button class="btn btn-xs btn-outline" onclick="upOpenLpgFlag(\'' + d.reading_id + '\')" title="Admin: flag this month\'s comparison as incorrect">' + (d.flagged ? '✏️' : '🚩') + '</button>' : '') +
+      '</td></tr>';
+  });
+
+  var mismatchTotal = Math.abs(sumPaid - sumCalc) > 0.5;
+  h += '</tbody><tfoot><tr style="border-top:2px solid var(--border);font-weight:800;background:var(--bg-surface2);">' +
+    '<td data-label="" colspan="4" style="padding:7px 8px;">TOTAL — ' + upLpgHistoryYear + '</td>' +
+    '<td data-label="Calculated" style="text-align:right;padding:7px 8px;">₹' + Math.round(sumCalc).toLocaleString('en-IN') + '</td>' +
+    '<td data-label="Paid" style="text-align:right;padding:7px 8px;">₹' + Math.round(sumPaid).toLocaleString('en-IN') + '</td>' +
+    '<td data-label=""></td>' +
+    '<td data-label="" colspan="2" style="padding:7px 8px;' + (mismatchTotal ? 'color:#f59e0b;' : 'color:var(--c-verified-fg);') + '">' +
+      (mismatchTotal ? '⚠️ Totals differ by ₹' + Math.round(Math.abs(sumPaid - sumCalc)).toLocaleString('en-IN') : '✓ Totals match') +
+    '</td></tr></tfoot></table></div>';
+
+  el.innerHTML = h;
+}
+
+function upOpenLpgFlag(readingId) {
+  var d = null;
+  upLpgHistoryData.forEach(function(x) { if (x.reading_id === readingId) d = x; });
+  if (!d) return;
+  var mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  openModal('<div class="modal-header"><span class="modal-title">🚩 Flag — ' + mn[d.month] + ' ' + d.year + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">' +
+    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Calculated ₹' + Math.round(d.amount).toLocaleString('en-IN') +
+      ' vs Paid ' + (d.live_paid_amount !== null ? '₹' + Math.round(d.live_paid_amount).toLocaleString('en-IN') : '(nothing recorded yet)') +
+      '. Flagging is purely informational — it never changes any amount or payment, it just records that a human looked at this and found it wrong.</div>' +
+    '<div class="form-group"><label>Note</label><textarea id="uplf-note" rows="3" style="width:100%;" placeholder="e.g. Resident paid for the wrong month by mistake">' + _e(d.flag_note || '') + '</textarea></div>' +
+    '<div class="form-actions">' +
+      (d.flagged ? '<button class="btn btn-outline" style="color:var(--c-rejected-fg);margin-right:auto;" onclick="upSaveLpgFlag(\'' + readingId + '\',false)">Remove flag</button>' : '') +
+      '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+      '<button class="btn btn-accent" onclick="upSaveLpgFlag(\'' + readingId + '\',true)">🚩 Save Flag</button>' +
+    '</div></div>');
+}
+
+function upSaveLpgFlag(readingId, flagged) {
+  var note = (document.getElementById('uplf-note') || {}).value || '';
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast(flagged ? 'Flagged' : 'Flag removed', 'success'); closeModalForce(); upLoadLpgHistory(upLpgHistoryUnitId); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('lpg.setFlag', { reading_id: readingId, flagged: flagged, note: note });
+}
+
+// Close whatever modal is open and return to the Unit Full Profile.
+// Used by the edit windows' Cancel / ✕ so closing an edit never dumps the
+// user back to the Units page.
+function upBackToProfile(unitId) {
+  closeModalForce();
+  setTimeout(function() { openUnitProfile(unitId); }, 120);
+}
+
+// Save the occupancy / registration flags, then re-render the profile so the
+// banner colour, ribbon and fee notes update immediately.
+function upSaveFlags(unitId) {
+  var occ = (document.getElementById('up-flag-occ') || {}).value || '';
+  var reg = (document.getElementById('up-flag-reg') || {}).value || '';
+  var cp  = (document.getElementById('up-flag-corpus') || {}).value || '';
+  var ca  = (document.getElementById('up-flag-corpus-amt') || {}).value || '';
+  var oitEl = document.getElementById('up-flag-oit');
+  var oit = oitEl ? oitEl.value : undefined;
+  var lpgEl = document.getElementById('up-flag-lpg');
+  var lpg = lpgEl ? lpgEl.value : undefined;
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (r && r.success) {
+        showToast('Unit flags updated', 'success');
+        openUnitProfile(unitId);
+        if (typeof loadUnits === 'function') loadUnits();
+      } else { showToast((r && r.error) || 'Failed to update', 'error'); }
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('units.updateFlags', { unit_id: unitId, occupancy: occ, registration: reg, corpus_paid: cp, corpus_amount: ca, owner_is_tenant: oit, lpg_mode: lpg });
+}
+
+// ── All-Payments filter + row rendering (bank transactions) ────
+// ═══ Parked Funds — the manual month-allocation home ═══
+// Money assigned to this unit via bank-transaction portions sits here
+// as a parked balance per fee type until the user manually allocates
+// it to months. Nothing is ever posted or deleted automatically.
+var upParkedData = null;
+var upParkedUnitId = null;
+
+// ═══ Monthly Occupancy & LPG Mode Timeline ═══
+// Each month shows the EFFECTIVE value (carried forward from the last
+// explicit change, or the unit's default if nothing's been set yet).
+// A small dot marks months with their own explicit entry; editing any
+// month sets a new "from this month on" change, which itself then
+// carries forward until the next explicit change.
+var upTimelineUnitId = null;
+var upTimelineYear = new Date().getFullYear();
+var upTimelineData = null;
+
+function upTimelineLoad(unitId) {
+  upTimelineUnitId = unitId;
+  var wrap = document.getElementById('up-timeline-wrap');
+  if (!wrap) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { wrap.innerHTML = ''; return; }
+    upTimelineData = r.data;
+    upTimelineRender();
+  }).withFailureHandler(function() { wrap.innerHTML = ''; })
+    .doPost_internal('occupancy.getYearView', { unit_id: unitId, year: upTimelineYear });
+}
+
+function upTimelineChangeYear(delta) {
+  upTimelineYear += delta;
+  upTimelineLoad(upTimelineUnitId);
+}
+
+function upTimelineRender() {
+  var wrap = document.getElementById('up-timeline-wrap');
+  var d = upTimelineData;
+  if (!wrap || !d) return;
+
+  var mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var occColor = { 'Occupied': '#10b981', 'Unoccupied': '#f59e0b' };
+  var lpgColor = { 'Using': '#10b981', 'Own Cylinder': '#3b82f6', 'Not Using': '#64748b' };
+
+  var h = '<div style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text-primary);margin:20px 0 6px;padding-bottom:6px;border-bottom:2px solid var(--gold,#f59e0b);">🗓️ Monthly Occupancy &amp; LPG Mode</div>' +
+    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Set the month a change actually took effect — every month after it carries the same value automatically, until the next change. A resident present even one day in a month counts that whole month as Occupied. Drives Waste Management &amp; LPG applicability everywhere in OXYGEN.</div>' +
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">' +
+      '<button class="btn btn-xs btn-outline" onclick="upTimelineChangeYear(-1)">◀</button>' +
+      '<strong style="font-size:13px;">' + upTimelineYear + '</strong>' +
+      '<button class="btn btn-xs btn-outline" onclick="upTimelineChangeYear(1)">▶</button>' +
+      '<a href="#" onclick="upShowRawEntries();return false;" style="margin-left:auto;font-size:11px;color:var(--accent);text-decoration:underline;" title="See every explicit entry ever set for this unit, across all years — useful if a value isn\'t carrying forward as expected">🔍 See all explicit entries</a>' +
+    '</div>' +
+    '<div class="table-wrap" style="overflow-x:auto;"><table style="min-width:760px;font-size:12px;"><thead><tr>' +
+      '<th style="text-align:left;">Month</th>';
+  d.months.forEach(function(mo, i) { h += '<th style="text-align:center;">' + mn[i] + '</th>'; });
+  h += '</tr></thead><tbody>';
+
+  h += '<tr><td style="font-weight:600;">Occupancy</td>';
+  d.months.forEach(function(mo, i) {
+    var c = occColor[mo.occupancy] || '#64748b';
+    h += '<td style="text-align:center;padding:3px;">' +
+      '<div onclick="upTimelineEdit(\'' + mo.month + '\',\'occupancy\')" title="Click to change — effective from ' + mo.month + ' onward" ' +
+      'style="cursor:pointer;border-radius:5px;padding:4px 2px;font-size:10.5px;font-weight:700;background:' + c + '22;color:' + c + ';position:relative;">' +
+      (mo.occupancy === 'Occupied' ? 'Occ' : 'Unocc') +
+      (mo.occupancy_explicit ? '<span style="position:absolute;top:1px;right:2px;font-size:7px;" title="Explicitly set this month">●</span>' : '') +
+      '</div></td>';
+  });
+  h += '</tr>';
+
+  h += '<tr><td style="font-weight:600;">LPG Mode</td>';
+  d.months.forEach(function(mo, i) {
+    var c = lpgColor[mo.lpg_mode] || '#64748b';
+    var label = mo.lpg_mode === 'Using' ? 'Piped' : mo.lpg_mode === 'Own Cylinder' ? 'Own Cyl.' : 'Not Using';
+    h += '<td style="text-align:center;padding:3px;">' +
+      '<div onclick="upTimelineEdit(\'' + mo.month + '\',\'lpg_mode\')" title="Click to change — effective from ' + mo.month + ' onward" ' +
+      'style="cursor:pointer;border-radius:5px;padding:4px 2px;font-size:10.5px;font-weight:700;background:' + c + '22;color:' + c + ';position:relative;">' +
+      label +
+      (mo.lpg_mode_explicit ? '<span style="position:absolute;top:1px;right:2px;font-size:7px;" title="Explicitly set this month">●</span>' : '') +
+      '</div></td>';
+  });
+  h += '</tr></tbody></table></div>';
+  wrap.innerHTML = h;
+}
+
+function upTimelineEdit(month, attribute) {
+  var isOcc = attribute === 'occupancy';
+  var options = isOcc ? ['Occupied', 'Unoccupied'] : ['Using', 'Own Cylinder', 'Not Using'];
+  var mo = null;
+  upTimelineData.months.forEach(function(m) { if (m.month === month) mo = m; });
+  var current = mo ? mo[attribute] : options[0];
+  var isExplicit = mo ? mo[attribute + '_explicit'] : false;
+
+  var optHtml = options.map(function(o) { return '<option value="' + o + '"' + (o === current ? ' selected' : '') + '>' + o + '</option>'; }).join('');
+  var h = '<div class="modal-header"><span class="modal-title">' + (isOcc ? '🏠 Occupancy' : '🔥 LPG Mode') + ' — ' + month + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">' +
+    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">This sets ' + month + '\'s value — every month AFTER it will automatically use the same value too, until you set a different one for some later month.</div>' +
+    '<div class="form-group"><label>Value</label><select id="ut-value" style="width:100%;">' + optHtml + '</select></div>' +
+    '<div class="form-actions">' +
+      (isExplicit ? '<button class="btn btn-outline" style="color:var(--c-rejected-fg);margin-right:auto;" onclick="upTimelineRemoveEntry(\'' + month + '\',\'' + attribute + '\')" title="' + month + ' currently has its own specific setting. This undoes that and makes ' + month + ' go back to matching whatever the month before it was set to.">↩️ Undo this month\'s change</button>' : '') +
+      '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+      '<button class="btn btn-accent" onclick="upTimelineSave(\'' + month + '\',\'' + attribute + '\')">💾 Save</button>' +
+    '</div></div>';
+  openModal(h);
+}
+
+function upTimelineSave(month, attribute) {
+  var value = document.getElementById('ut-value').value;
+  doPostWithHistoryConfirm('occupancy.setStatus',
+    { unit_id: upTimelineUnitId, attribute: attribute, effective_month: month, value: value },
+    function(r) {
+      if (r && r.success) { showToast('Saved — effective from ' + month + ' onward', 'success'); closeModalForce(); setTimeout(function(){ openUnitProfile(upTimelineUnitId); }, 150); }
+      else showToast((r && r.error) || 'Failed', 'error');
+    },
+    function(e) { showToast('Error: ' + e, 'error'); });
+}
+
+function upTimelineRemoveEntry(month, attribute) {
+  // Need the entry_id — fetch this attribute's full timeline to find it,
+  // since the year-view doesn't carry ids for entries outside the
+  // currently-viewed year's explicit set.
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { showToast('Could not look up the entry', 'error'); return; }
+    var entry = null;
+    r.data.forEach(function(e) { if (e.effective_month === month) entry = e; });
+    if (!entry) { showToast('No explicit entry found for that month', 'error'); return; }
+    doPostWithHistoryConfirm('occupancy.deleteEntry', { entry_id: entry.entry_id },
+      function(r2) {
+        if (r2 && r2.success) { showToast('Removed — inherits the prior value again', 'success'); closeModalForce(); setTimeout(function(){ openUnitProfile(upTimelineUnitId); }, 150); }
+        else showToast((r2 && r2.error) || 'Failed', 'error');
+      },
+      function(e) { showToast('Error: ' + e, 'error'); });
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('occupancy.getTimeline', { unit_id: upTimelineUnitId, attribute: attribute });
+}
+
+// Shows every explicit entry ever set for this unit — both Occupancy
+// and LPG Mode, every year, not just the one currently in view. This is
+// the ground truth behind the computed carry-forward table above: if a
+// value isn't carrying forward the way it seems like it should, the
+// answer is always visible here (a later entry you forgot about, or one
+// left over from earlier testing, is what's actually overriding it).
+function upShowRawEntries() {
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { showToast((r && r.error) || 'Failed to load', 'error'); return; }
+    var entries = r.data;
+    var h = '<div class="modal-header"><span class="modal-title">🔍 All Explicit Entries — ' + upTimelineUnitId + '</span>' +
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div><div class="modal-body">';
+    if (!entries.length) {
+      h += '<div style="color:var(--text-muted);padding:12px 0;">No explicit entries at all — every month, every year, is currently just following this unit\'s default Occupancy/LPG Mode settings above.</div>';
+    } else {
+      h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px;">Every one of these is a specific month where something other than the default was explicitly set. Each stays in effect until the NEXT entry for the same attribute (in date order) — that\'s why a change can appear to "stop" partway through a year, if another entry already exists further along.</div>';
+      h += '<table style="width:100%;font-size:12.5px;"><thead><tr><th style="text-align:left;">Month</th><th style="text-align:left;">Attribute</th><th style="text-align:left;">Value</th><th></th></tr></thead><tbody>';
+      entries.forEach(function(e) {
+        h += '<tr><td>' + e.effective_month + '</td><td>' + (e.attribute === 'occupancy' ? 'Occupancy' : 'LPG Mode') + '</td>' +
+          '<td style="font-weight:700;">' + e.value + '</td>' +
+          '<td><button class="btn btn-xs btn-outline" style="color:var(--c-rejected-fg);" onclick="upDeleteRawEntry(\'' + e.entry_id + '\')">🗑 Delete</button></td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+    h += '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Close</button></div></div>';
+    openModal(h);
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('occupancy.getAllEntriesForUnit', { unit_id: upTimelineUnitId });
+}
+
+function upDeleteRawEntry(entryId) {
+  if (!confirm('Delete this entry? The affected month(s) will go back to inheriting whatever was in effect before it.')) return;
+  doPostWithHistoryConfirm('occupancy.deleteEntry', { entry_id: entryId },
+    function(r) {
+      if (r && r.success) { showToast('Deleted', 'success'); closeModalForce(); setTimeout(function(){ openUnitProfile(upTimelineUnitId); }, 150); }
+      else showToast((r && r.error) || 'Failed', 'error');
+    },
+    function(e) { showToast('Error: ' + e, 'error'); });
+}
+
+function upParkedLoad(unitId) {
+  upParkedUnitId = unitId;
+  var wrap = document.getElementById('up-parked-wrap');
+  if (!wrap) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { wrap.innerHTML = ''; return; }
+    upParkedData = r.data;
+    upParkedRender();
+  }).withFailureHandler(function() { wrap.innerHTML = ''; })
+    .doPost_internal('units.parkedFunds', { unit_id: unitId });
+}
+
+function upParkedRender(expandedType) {
+  var wrap = document.getElementById('up-parked-wrap');
+  var d = upParkedData;
+  if (!wrap || !d) return;
+  if (!d.pairs.length) { wrap.innerHTML = ''; return; } // nothing parked — section invisible
+
+  var h = '<div style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text-primary);margin:20px 0 6px;padding-bottom:6px;border-bottom:2px solid var(--gold,#f59e0b);">🅿️ Parked Funds</div>' +
+    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Money assigned to this unit from bank transactions (portions), waiting for YOU to allocate it to months. 100% manual — nothing here is posted automatically.</div>';
+
+  d.pairs.forEach(function(p) {
+    var stateColor = p.remaining > 0.005 ? '#f59e0b' : (p.remaining < -0.005 ? 'var(--c-rejected-fg)' : 'var(--c-verified-fg)');
+    var stateText = p.remaining > 0.005 ? formatRupees(p.remaining) + ' unallocated'
+                  : p.remaining < -0.005 ? 'OVER-ALLOCATED by ' + formatRupees(-p.remaining) + ' (parked backing was removed — review allocations)'
+                  : 'fully allocated';
+    h += '<div style="border:1px solid var(--border,rgba(128,128,128,.3));border-radius:8px;padding:10px 12px;margin-bottom:10px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<strong style="font-size:13.5px;">' + _e(p.payment_type) + '</strong>' +
+        '<span style="font-size:12px;">Parked: <strong>' + formatRupees(p.parked) + '</strong></span>' +
+        '<span style="font-size:12px;">Allocated: <strong>' + formatRupees(p.allocated) + '</strong></span>' +
+        '<span style="font-size:12px;color:' + stateColor + ';font-weight:700;">' + stateText + '</span>' +
+        '<span style="margin-left:auto;"></span>' +
+        (p.remaining > 0.005 ? '<button class="btn btn-xs btn-accent" onclick="upOpenAllocate(\'' + _e(p.payment_type) + '\')">📅 Allocate months</button>' : '') +
+        (p.allocations.length ? '<button class="btn btn-xs btn-outline" onclick="upRemoveAllocations(\'' + _e(p.payment_type) + '\')">🗑 Remove allocations…</button>' : '') +
+      '</div>';
+    if (p.allocations.length) {
+      h += '<div style="font-size:11.5px;color:var(--text-muted);margin-top:6px;">Allocated so far: ' +
+        p.allocations.map(function(a) { return a.month + ' ₹' + Number(a.amount).toLocaleString('en-IN'); }).join(' · ') + '</div>';
+    }
+    if (expandedType === p.payment_type) h += upAllocateEditorHtml(p);
+    h += '</div>';
+  });
+  wrap.innerHTML = h;
+}
+
+function upOpenAllocate(type) { upParkedRender(type); }
+
+function upAllocateEditorHtml(p) {
+  var yr = new Date().getFullYear();
+  var mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var inputs = '';
+  for (var m = 1; m <= 12; m++) {
+    inputs += '<div style="text-align:center;"><label style="font-size:10px;color:var(--text-muted);display:block;">' + mn[m-1] + '</label>' +
+      '<input type="number" step="0.01" id="up-alloc-m' + m + '" style="width:72px;padding:5px 6px;font-size:12px;text-align:right;" oninput="upAllocRefresh(' + p.remaining + ')"></div>';
+  }
+  return '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border,rgba(128,128,128,.3));">' +
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">' +
+      '<label style="font-size:11px;margin:0;">Year</label>' +
+      '<input type="number" id="up-alloc-year" value="' + yr + '" style="width:86px;padding:5px 8px;font-size:12px;">' +
+      '<span style="font-size:11.5px;color:var(--text-muted);">Type only what YOU decide each month gets. Empty months are skipped. Total may not exceed the unallocated balance.</span>' +
+    '</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + inputs + '</div>' +
+    '<div id="up-alloc-total" style="margin-top:8px;font-size:12.5px;font-weight:700;"></div>' +
+    '<div style="margin-top:8px;display:flex;gap:8px;">' +
+      '<button class="btn btn-sm btn-outline" onclick="upParkedRender()">Cancel</button>' +
+      '<button class="btn btn-sm btn-accent" onclick="upSaveAllocation(\'' + _e(p.payment_type) + '\',' + p.remaining + ')">💾 Save allocation</button>' +
+    '</div></div>';
+}
+
+function upAllocRefresh(remaining) {
+  var total = 0;
+  for (var m = 1; m <= 12; m++) {
+    var el = document.getElementById('up-alloc-m' + m);
+    if (el && Number(el.value) > 0) total += Number(el.value);
+  }
+  var el2 = document.getElementById('up-alloc-total');
+  if (!el2) return;
+  var left = Math.round((remaining - total) * 100) / 100;
+  el2.innerHTML = 'Entered: ' + formatRupees(total) + ' · ' +
+    (left >= -0.005
+      ? '<span style="color:var(--text-muted);">' + formatRupees(Math.max(0, left)) + ' will remain parked</span>'
+      : '<span style="color:var(--c-rejected-fg);">exceeds the unallocated balance by ' + formatRupees(-left) + ' — Save will refuse</span>');
+}
+
+function upSaveAllocation(type, remaining) {
+  var year = Number((document.getElementById('up-alloc-year') || {}).value);
+  if (!year || year < 2000 || year > 2100) { showToast('Enter a valid year', 'error'); return; }
+  var months = {};
+  var total = 0;
+  for (var m = 1; m <= 12; m++) {
+    var el = document.getElementById('up-alloc-m' + m);
+    var v = el ? Number(el.value) : 0;
+    if (v > 0) { months[year + '-' + (m < 10 ? '0' + m : m)] = v; total += v; }
+  }
+  if (!total) { showToast('Enter at least one month amount', 'error'); return; }
+  if (total - remaining > 0.005) { showToast('Entered ' + total + ' exceeds the unallocated ' + remaining + ' — nothing saved', 'error'); return; }
+  doPostWithHistoryConfirm('portions.allocate',
+    { unit_id: upParkedUnitId, payment_type: type, months: months },
+    function(r) {
+      if (r && r.success) {
+        showToast('Allocated ' + r.data.created.length + ' month(s) — ' + formatRupees(r.data.remaining) + ' still parked', 'success');
+        upParkedLoad(upParkedUnitId);
+      } else showToast((r && r.error) || 'Failed', 'error');
+    },
+    function(e) { showToast('Error: ' + e, 'error'); });
+}
+
+function upRemoveAllocations(type) {
+  // Phase 1: fetch the exact list of what would be deleted.
+  google.script.run.withSuccessHandler(function(r) {
+    if (!r || !r.success) { showToast((r && r.error) || 'Failed', 'error'); return; }
+    var d = r.data;
+    if (!d.needs_confirm) { showToast('Nothing to remove', ''); return; }
+    var lines = d.records.map(function(a) { return '  • ' + a.month + ' — ₹' + Number(a.amount).toLocaleString('en-IN'); }).join('\n');
+    var ok = confirm('Remove ALL manual month allocations for ' + upParkedUnitId + ' ' + type + '?\n\nExactly these ' + d.records.length + ' record(s) will be deleted — nothing else:\n\n' + lines);
+    if (!ok) return;
+    // Phase 2: delete precisely that list.
+    doPostWithHistoryConfirm('portions.removeAllocations',
+      { unit_id: upParkedUnitId, payment_type: type, confirm: true },
+      function(r2) {
+        if (r2 && r2.success) { showToast('Removed ' + r2.data.deleted + ' allocation(s) — the money is parked again', 'success'); upParkedLoad(upParkedUnitId); }
+        else showToast((r2 && r2.error) || 'Failed', 'error');
+      },
+      function(e2) { showToast('Error: ' + e2, 'error'); });
+  }).withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('portions.removeAllocations', { unit_id: upParkedUnitId, payment_type: type });
+}
+
+function upRenderPayments() {
+  var box = document.getElementById('up-pay-rows');
+  if (!box) return;
+  var yr = (document.getElementById('up-pay-year')  || {}).value || '';
+  var mo = (document.getElementById('up-pay-month') || {}).value || '';
+  var ty = (document.getElementById('up-pay-type')  || {}).value || '';
+
+  var list = (upPayAll || []).filter(function(t) {
+    var ym = upParseYM(t.date);
+    if (yr && (!ym || ym.year !== parseInt(yr,10)))  return false;
+    if (mo && (!ym || ym.month !== parseInt(mo,10))) return false;
+    if (ty && t.payment_type !== ty)                 return false;
+    return true;
+  });
+  // Newest transaction date first
+  list.sort(function(a,b){
+    var ya=upParseYM(a.date), yb=upParseYM(b.date);
+    var ka=ya?(ya.year*100+ya.month):0, kb=yb?(yb.year*100+yb.month):0;
+    if (kb!==ka) return kb-ka;
+    return String(b.date||'').localeCompare(String(a.date||''));
+  });
+
+  if (!list.length) {
+    box.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:12px;background:var(--bg-surface2);border-radius:var(--radius-sm);">No transactions match these filters.</div>';
+    return;
+  }
+
+  var total = 0;
+  list.forEach(function(t){ total += upTxnAmount(t); });
+
+  var rows = '';
+  list.forEach(function(t) {
+    var c = upTypeColor(t.payment_type);
+    var amt = upTxnAmount(t);
+    var payer = t.parsed_name || t.match_name || '';
+    var typePill = (t.payment_type && t.payment_type!=='Unknown')
+      ? '<span class="pill" style="background:'+c.bg+';color:'+c.fg+';font-weight:600;font-size:11px;">' + _e(upTypeLabel(t.payment_type)) + '</span>'
+      : '<span style="font-size:11px;color:var(--text-muted);font-style:italic;">Unclassified</span>';
+    // Transactions from the second bank account carry a small badge so
+    // it's always clear which account the money actually arrived in.
+    if (t.account === '2') typePill += ' <span class="pill" title="This payment arrived in the older IOB LPG account, not the main account" style="background:rgba(245,158,11,.15);color:#f59e0b;font-weight:600;font-size:10px;">🔥 IOB LPG A/c</span>';
+    var sub = payer ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + _e(payer) + '</div>' : '';
+    if (t.note) sub += '<div style="font-size:11px;color:var(--text-muted);margin-top:1px;">📝 ' + _e(t.note) + '</div>';
+    rows +=
+      '<div style="display:flex;align-items:flex-start;gap:12px;padding:9px 12px;border-bottom:1px solid var(--border);">' +
+        '<div style="width:96px;font-size:12px;font-weight:600;color:var(--text-secondary);flex-shrink:0;">' + _e(t.date) + '</div>' +
+        '<div style="flex:1;min-width:0;">' + typePill + sub + '</div>' +
+        '<div style="width:100px;text-align:right;font-weight:700;font-size:13px;flex-shrink:0;color:var(--c-verified-fg);">₹' + Number(amt).toLocaleString('en-IN') + '</div>' +
+      '</div>';
+  });
+
+  box.innerHTML =
+    '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">' + rows + '</div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:12px;margin-top:8px;padding:0 4px;color:var(--text-muted);">' +
+      '<span>' + list.length + ' transaction' + (list.length===1?'':'s') + ' shown</span>' +
+      '<span style="font-weight:700;color:var(--c-verified-fg);">₹' + total.toLocaleString('en-IN') + ' total</span>' +
+    '</div>';
+}
+
+// Full-size picture window; Close returns to the Unit Full Profile.
+function upShowBigPhoto(link, unitId) {
+  var url = _upPhotoUrl(link).replace('sz=w400', 'sz=w1200');
+  openModal(
+    '<div class="modal-header"><span class="modal-title">📷 ' + _e(unitId) + ' — Profile Photo</span>' +
+    '<button class="modal-close" onclick="upBackToProfile(\'' + _e(unitId) + '\')">✕</button></div>' +
+    '<div class="modal-body" style="text-align:center;">' +
+      '<img src="' + _e(url) + '" style="max-width:100%;max-height:70vh;border-radius:12px;" ' +
+        'onerror="this.replaceWith(document.createTextNode(\'Could not load the photo.\'))">' +
+      '<div style="margin-top:14px;"><button class="btn btn-outline" onclick="upBackToProfile(\'' + _e(unitId) + '\')">Close — back to profile</button></div>' +
+    '</div>');
+}
+
+// ── Archive owner / resident (unit sold or moved out) ─────────
+function upArchiveOwner(ownerId, name, unitId) {
+  if (!confirm('Archive owner "' + name + '"?\n\nTheir full record moves to the Owner History for Unit ' + unitId + ', and the Owner section is cleared so you can add the new owner.\n\nThis does not delete any history.')) return;
+  showToast('Archiving…', '');
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (r && r.success) { showToast('Owner archived. Section cleared.', 'success'); ownersAll = []; openUnitProfile(unitId); }
+      else { showToast((r && r.error) || 'Failed to archive', 'error'); }
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('owners.archive', { owner_id: ownerId, archived_by: 'Manager' });
+}
+
+function upArchiveTenant(tenantId, name, unitId) {
+  if (!confirm('Archive resident "' + name + '"?\n\nTheir full record moves to the Resident History for Unit ' + unitId + ', and the Resident section is cleared so you can add the new resident.\n\nThis does not delete any history.')) return;
+  showToast('Archiving…', '');
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (r && r.success) { showToast('Resident archived. Section cleared.', 'success'); tenantsAll = []; openUnitProfile(unitId); }
+      else { showToast((r && r.error) || 'Failed to archive', 'error'); }
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('tenants.archive', { tenant_id: tenantId, archived_by: 'Manager' });
+}
+
+// ── History toggle (hidden by default) ────────────────────────
+function upToggleHistory(kind, unitId) {
+  var box = document.getElementById('up-hist-' + kind);
+  var btn = document.getElementById('up-hist-' + kind + '-btn');
+  if (!box) return;
+  if (box.style.display !== 'none') {           // currently open → hide
+    box.style.display = 'none';
+    if (btn) btn.innerHTML = kind === 'owner' ? '🕓 View Unit Owner History' : '🕓 View Resident History';
+    return;
+  }
+  box.style.display = 'block';
+  if (btn) btn.innerHTML = kind === 'owner' ? '🔼 Hide Owner History' : '🔼 Hide Resident History';
+  box.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading history…</div>';
+  google.script.run
+    .withSuccessHandler(function(r) {
+      var list = (r && r.success && r.data) ? r.data : [];
+      box.innerHTML = upHistoryHtml(kind, list);
+    })
+    .withFailureHandler(function(e) { box.innerHTML = '<div style="color:var(--c-rejected-fg);font-size:12px;padding:8px;">Error: ' + e + '</div>'; })
+    .doPost_internal(kind === 'owner' ? 'owners.history' : 'tenants.history', { unit_id: unitId });
+}
+
+function upHistoryHtml(kind, list) {
+  if (!list.length) {
+    return '<div style="color:var(--text-muted);font-size:12px;padding:10px;background:var(--bg-surface2);border-radius:var(--radius-sm);">No archived ' + (kind === 'owner' ? 'owners' : 'residents') + ' for this unit.</div>';
+  }
+  var h = '<div style="border:1px dashed var(--border-strong,var(--border));border-radius:var(--radius-sm);overflow:hidden;">';
+  list.forEach(function(p, i) {
+    var when = upFmtArchiveDate(p.archived_at);
+    var phones = [p.phone, p.phone2].filter(function(x){ return x; }).join(' · ');
+    var period = '';
+    if (kind === 'tenant' && (p.move_in_date || p.move_out_date)) {
+      period = (p.move_in_date ? formatDate(p.move_in_date) : '?') + ' → ' + (p.move_out_date ? formatDate(p.move_out_date) : '?');
+    }
+    h += '<div style="padding:10px 12px;' + (i ? 'border-top:1px solid var(--border);' : '') + 'background:var(--bg-surface2);">' +
+      '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">' +
+        '<span style="font-weight:700;font-size:13px;">' + _e(p.name || '—') + (p.name2 ? ' & ' + _e(p.name2) : '') + '</span>' +
+        '<span style="font-size:11px;color:var(--text-muted);">Archived ' + _e(when) + '</span>' +
+      '</div>' +
+      (phones ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">📞 ' + _e(phones) + '</div>' : '') +
+      (p.email ? '<div style="font-size:11px;color:var(--text-muted);">✉️ ' + _e(p.email) + '</div>' : '') +
+      (period ? '<div style="font-size:11px;color:var(--text-muted);">🗓 ' + _e(period) + '</div>' : '') +
+      (p.bank_names ? '<div style="font-size:11px;color:var(--text-muted);">🏦 ' + _e(p.bank_names) + '</div>' : '') +
+      '</div>';
+  });
+  h += '</div>';
+  return h;
+}
+
+function upFmtArchiveDate(iso) {
+  if (!iso) return '—';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso).slice(0, 10);
+  var mns = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var day = d.getDate();
+  return (day < 10 ? '0' + day : String(day)) + ' ' + mns[d.getMonth()] + ' ' + d.getFullYear();
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+// Drive link -> displayable thumbnail URL
+function _upPhotoUrl(link) {
+  if (!link) return '';
+  var m = String(link).match(/[-\w]{25,}/);
+  if (m && link.indexOf('drive.google') > -1) {
+    return 'https://drive.google.com/thumbnail?id=' + m[0] + '&sz=w400';
+  }
+  return link;
+}
+
+function _upPill(status) {
+  var map = {
+    'Occupied':'pill-occupied','Vacant':'pill-vacant',
+    'Verified':'pill-verified','Pending':'pill-pending','Rejected':'pill-rejected',
+    'Resident':'pill-resident','Non-Resident':'pill-non-resident'
+  };
+  return '<span class="pill ' + (map[status]||'') + '">' + _e(status) + '</span>';
+}
+
+function _parseVehicles(jsonStr) {
+  if (!jsonStr || jsonStr === '[]' || jsonStr === '') return [];
+  try { return JSON.parse(jsonStr); } catch(e) { return []; }
+}
+
+function _e(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+
+// ══ Owner & Tenant editing suite (moved from the former Owners/Tenants pages) ══
+var ownersAll = [];
+var tenantsAll = [];
+var OW_MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+var TN_MONTHS = OW_MONTHS;
+
+function owE(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function ownersPhotoUrl(link) {
+  if (!link) return '';
+  var m = String(link).match(/[-\w]{25,}/); // Drive file IDs are 25+ chars
+  if (m && link.indexOf('drive.google') > -1) {
+    return 'https://drive.google.com/thumbnail?id=' + m[0] + '&sz=w400';
+  }
+  return link;
+}
+
+function ownersParseVehicles(jsonStr) {
+  try {
+    var a = JSON.parse(jsonStr || '[]');
+    return (a && a.length !== undefined) ? a : [];
+  } catch (e) { return []; }
+}
+
+function ownersFind(ownerId) {
+  for (var i = 0; i < ownersAll.length; i++) {
+    if (ownersAll[i].owner_id === ownerId) return ownersAll[i];
+  }
+  return null;
+}
+
+function ownersAddDynInput(containerId, cls, placeholder, value) {
+  var box = document.getElementById(containerId);
+  if (!box) return;
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center;';
+  var inp = document.createElement('input');
+  inp.type = 'text';
+  inp.className = cls;
+  inp.placeholder = placeholder;
+  inp.value = value || '';
+  inp.style.cssText = 'flex:1;';
+  var del = document.createElement('button');
+  del.className = 'btn btn-sm btn-outline';
+  del.textContent = '✕';
+  del.onclick = function() { box.removeChild(row); };
+  row.appendChild(inp);
+  row.appendChild(del);
+  box.appendChild(row);
+}
+
+function ownersDynValues(cls) {
+  var inputs = document.getElementsByClassName(cls);
+  var out = [];
+  for (var i = 0; i < inputs.length; i++) {
+    var v = inputs[i].value.trim();
+    if (v) out.push(v);
+  }
+  return out;
+}
+
+function ownersVehicleStr(v) {
+  var parts = [v.reg || '', v.make || '', v.model || '', v.colour || ''];
+  while (parts.length && !parts[parts.length - 1]) parts.pop();
+  return parts.join('/');
+}
+
+function ownersVehicleObj(s) {
+  var p = String(s || '').split('/');
+  for (var i = 0; i < p.length; i++) p[i] = p[i].trim();
+  return {
+    reg:    p[0] || '',
+    make:   p.length > 1 ? p[1] : '',
+    model:  p.length > 2 ? p[2] : '',
+    colour: p.length > 3 ? p.slice(3).join('/') : ''
+  };
+}
+
+function ownersEdit(ownerId) {
+  var o = ownersFind(ownerId);
+  if (!o) return;
+
+  function fi(id, label, val, type) {
+    return '<div class="form-group"><label>' + label + '</label>' +
+      '<input id="' + id + '" type="' + (type || 'text') + '" value="' + owE(val || '') + '"></div>';
+  }
+  function fsel(id, label, val, opts) {
+    var ops = '';
+    for (var i = 0; i < opts.length; i++) {
+      ops += '<option' + (opts[i] === val ? ' selected' : '') + '>' + opts[i] + '</option>';
+    }
+    return '<div class="form-group"><label>' + label + '</label><select id="' + id + '">' + ops + '</select></div>';
+  }
+
+  openModal(
+    '<div class="modal-header"><span class="modal-title">✏️ Edit Owner — ' + owE(o.unit_id) + '</span>' +
+    '<button class="modal-close" onclick="upBackToProfile(\'' + owE(o.unit_id) + '\')">✕</button></div>' +
+    '<div class="modal-body" style="max-height:75vh;overflow-y:auto">' +
+
+    '<div class="ow-sec" style="margin-top:0">Names</div>' +
+    fi('oe-name','Name 01 *',o.name) +
+    '<div class="form-row">' + fi('oe-name2','Name 02',o.name2) + fi('oe-name3','Name 03',o.name3) + '</div>' +
+
+    '<div class="ow-sec">Contact</div>' +
+    '<div class="form-row">' + fi('oe-phone','Phone 01',o.phone) + fi('oe-phone2','Phone 02',o.phone2) + '</div>' +
+    '<div class="form-row">' + fi('oe-phone3','Phone 03',o.phone3) + fi('oe-email','Email ID 01',o.email,'email') + '</div>' +
+    fi('oe-email2','Email ID 02',o.email2,'email') +
+
+    '<div class="ow-sec">Association Role</div>' +
+    '<div class="form-row">' +
+      fsel('oe-exec','Exec Member',o.exec_member || 'No',['No','Yes']) +
+      fi('oe-exec-title','Exec Title (President / Secretary…)',o.exec_member_title) +
+    '</div>' +
+    fi('oe-parking','Car Parking',o.car_parking_slot) +
+
+    '<div class="ow-sec">Residence</div>' +
+    '<div class="form-row">' +
+      fsel('oe-living','Living Status',o.living_status || 'Non-Resident',['Non-Resident','Resident']) +
+      fi('oe-country','Residing Country',o.residing_country) +
+    '</div>' +
+    fi('oe-addr-india','Address (India)',o.address_india) +
+    fi('oe-addr-abroad','Address (Abroad)',o.address_abroad) +
+
+    '<div class="ow-sec">Work</div>' +
+    '<div class="form-row">' + fi('oe-employer','Employer',o.employer) + fi('oe-desig','Work Designation',o.work_designation) + '</div>' +
+    fi('oe-work-addr','Work Address',o.work_address) +
+
+    '<div class="ow-sec">Records</div>' +
+    '<div class="form-row">' + fi('oe-tc','TC No.',o.tc_number) + fi('oe-kseb','KSEB Consumer No.',o.kseb_consumer_no) + '</div>' +
+    fi('oe-notes','Notes',o.notes) +
+
+    '<div class="ow-sec">Profile Picture</div>' +
+    '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px">' +
+      '<img id="oe-pic-preview" src="' + owE(ownersPhotoUrl(o.profile_picture)) + '" alt="" ' +
+        'onerror="this.style.display=\'none\'" ' +
+        'style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);' +
+        (o.profile_picture ? '' : 'display:none;') + '">' +
+      '<div style="flex:1;min-width:200px">' +
+        '<input type="file" id="oe-pic-file" accept="image/*" ' +
+          'style="display:block;width:100%;padding:7px 9px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);font-size:12px;margin-bottom:6px">' +
+        '<button class="btn btn-sm btn-accent" id="oe-pic-upload-btn" onclick="ownersUploadPhoto(\'' + owE(ownerId) + '\')">📤 Upload Photo</button>' +
+        '<span id="oe-pic-upload-status" style="font-size:11px;color:var(--text-muted);margin-left:8px"></span>' +
+      '</div>' +
+    '</div>' +
+    fi('oe-pic','…or paste a photo URL (Google Drive link)',o.profile_picture) +
+
+    '<div class="ow-sec">Names on Bank Statement</div>' +
+    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">As they appear in bank statement narrations — used for auto-matching payments. Add as many as needed.</div>' +
+    '<div id="oe-banks"></div>' +
+    '<button class="btn btn-sm btn-outline" onclick="ownersAddDynInput(\'oe-banks\',\'oe-bank-inp\',\'e.g. SILPA S PRASAD\',\'\')" style="margin-bottom:6px">+ Add bank name</button>' +
+
+    '<div class="ow-sec">Vehicles</div>' +
+    '<div class="form-row">' + fi('oe-n4w','No. of 4-Wheelers',o.num_4w,'number') + fi('oe-n2w','No. of 2-Wheelers',o.num_2w,'number') + '</div>' +
+    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Format: REG / MAKE / MODEL / COLOUR (e.g. KL01CV4044/Maruti/WagonR/Red)</div>' +
+    '<div style="font-size:12px;font-weight:700;margin:4px 0 2px">4-Wheelers</div>' +
+    '<div id="oe-v4"></div>' +
+    '<button class="btn btn-sm btn-outline" onclick="ownersAddDynInput(\'oe-v4\',\'oe-v4-inp\',\'KL01AB1234/Make/Model/Colour\',\'\')" style="margin-bottom:6px">+ Add 4-wheeler</button>' +
+    '<div style="font-size:12px;font-weight:700;margin:4px 0 2px">2-Wheelers</div>' +
+    '<div id="oe-v2"></div>' +
+    '<button class="btn btn-sm btn-outline" onclick="ownersAddDynInput(\'oe-v2\',\'oe-v2-inp\',\'KL01CD5678/Make/Model/Colour\',\'\')" style="margin-bottom:6px">+ Add 2-wheeler</button>' +
+
+    '<div class="form-actions">' +
+      '<button class="btn btn-outline" onclick="upBackToProfile(\'' + owE(o.unit_id) + '\')">Cancel</button>' +
+      '<button class="btn btn-accent" onclick="ownersSave(\'' + owE(ownerId) + '\')">💾 Save</button>' +
+    '</div></div>'
+  );
+
+  // Populate the dynamic lists with existing values (one input each)
+  var bn = (o.bank_names || '').split(',');
+  for (var i = 0; i < bn.length; i++) {
+    var v = bn[i].trim();
+    if (v) ownersAddDynInput('oe-banks', 'oe-bank-inp', 'e.g. SILPA S PRASAD', v);
+  }
+  var v4list = ownersParseVehicles(o.vehicles_4w);
+  for (var i = 0; i < v4list.length; i++) {
+    ownersAddDynInput('oe-v4', 'oe-v4-inp', 'KL01AB1234/Make/Model/Colour', ownersVehicleStr(v4list[i]));
+  }
+  var v2list = ownersParseVehicles(o.vehicles_2w);
+  for (var i = 0; i < v2list.length; i++) {
+    ownersAddDynInput('oe-v2', 'oe-v2-inp', 'KL01CD5678/Make/Model/Colour', ownersVehicleStr(v2list[i]));
+  }
+}
+
+function ownersSave(ownerId) {
+  function gv(id) { var e = document.getElementById(id); return e ? e.value.trim() : ''; }
+  var data = {
+    owner_id: ownerId,
+    name:  gv('oe-name'),  name2:  gv('oe-name2'), name3:  gv('oe-name3'),
+    phone: gv('oe-phone'), phone2: gv('oe-phone2'),phone3: gv('oe-phone3'),
+    email: gv('oe-email'), email2: gv('oe-email2'),
+    exec_member: gv('oe-exec'), exec_member_title: gv('oe-exec-title'),
+    car_parking_slot: gv('oe-parking'),
+    living_status: gv('oe-living'), residing_country: gv('oe-country'),
+    address_india: gv('oe-addr-india'), address_abroad: gv('oe-addr-abroad'),
+    employer: gv('oe-employer'), work_designation: gv('oe-desig'),
+    work_address: gv('oe-work-addr'),
+    tc_number: gv('oe-tc'), kseb_consumer_no: gv('oe-kseb'),
+    notes: gv('oe-notes'), profile_picture: gv('oe-pic'),
+    num_4w: gv('oe-n4w'), num_2w: gv('oe-n2w'),
+    bank_names: ownersDynValues('oe-bank-inp').join(', '),
+    vehicles_4w: JSON.stringify(ownersDynValues('oe-v4-inp').map(ownersVehicleObj)),
+    vehicles_2w: JSON.stringify(ownersDynValues('oe-v2-inp').map(ownersVehicleObj))
+  };
+  if (!data.name) { showToast('Name 01 is required','error'); return; }
+
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (r && r.success) { showToast('Owner saved!','success'); closeModalForce(); var oo = ownersFind(ownerId); ownersAll = []; if (oo && oo.unit_id) setTimeout(function(){ openUnitProfile(oo.unit_id); }, 150); if (typeof loadUnits === 'function') loadUnits(); }
+      else { showToast((r && r.error) || 'Failed','error'); }
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e,'error'); })
+    .doPost_internal('owners.update', data);
+}
+
+function ownersUploadPhoto(ownerId) {
+  var inp    = document.getElementById('oe-pic-file');
+  var btn    = document.getElementById('oe-pic-upload-btn');
+  var status = document.getElementById('oe-pic-upload-status');
+
+  function say(msg) { if (status) status.textContent = msg; }
+
+  if (!inp || !inp.files || inp.files.length === 0) { say('Choose an image file first.'); return; }
+  var file = inp.files[0];
+  if (file.type.indexOf('image/') !== 0) { say('Please choose an image (JPG/PNG).'); return; }
+  if (file.size > 4 * 1024 * 1024) { say('Image too large — please use one under 4 MB.'); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Uploading…'; }
+  say('Reading file…');
+
+  var reader = new FileReader();
+  reader.onerror = function() {
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Upload Photo'; }
+    say('Could not read the file.');
+  };
+  reader.onload = function(ev) {
+    var arr = new Uint8Array(ev.target.result);
+    var bin = '';
+    for (var i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+    say('Uploading to Drive…');
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (btn) { btn.disabled = false; btn.textContent = '📤 Upload Photo'; }
+        if (!res || !res.success) { say('Upload failed: ' + (res ? res.error : 'no response')); return; }
+        var url = res.data && res.data.url ? res.data.url : '';
+        say('✓ Uploaded and saved!');
+        // Update the URL field + preview in the open modal
+        var urlInp = document.getElementById('oe-pic');
+        if (urlInp) urlInp.value = url;
+        var prev = document.getElementById('oe-pic-preview');
+        if (prev) { prev.src = ownersPhotoUrl(url); prev.style.display = ''; }
+        // Update local cache so the table/thumbnail reflect it immediately
+        var o = ownersFind(ownerId);
+        if (o) o.profile_picture = url;
+        if (typeof loadUnits === 'function') loadUnits();
+      })
+      .withFailureHandler(function(err) {
+        if (btn) { btn.disabled = false; btn.textContent = '📤 Upload Photo'; }
+        say('Error: ' + String(err));
+      })
+      .uploadOwnerPhoto({
+        owner_id: ownerId,
+        content:  btoa(bin),
+        filename: file.name,
+        mimeType: file.type
+      });
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function ownersOpenEditSafe(ownerId) {
+  if (ownersFind(ownerId)) { ownersEdit(ownerId); return; }
+  showToast('Loading owner\u2026', '');
+  google.script.run
+    .withSuccessHandler(function(r) {
+      ownersAll = (r && r.success && r.data) ? r.data : [];
+      if (ownersFind(ownerId)) ownersEdit(ownerId);
+      else showToast('Owner not found', 'error');
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('owners.getAll', {});
+}
+
+function tnE(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function tnParseVehicles(jsonStr) {
+  try {
+    var a = JSON.parse(jsonStr || '[]');
+    return (a && a.length !== undefined) ? a : [];
+  } catch (e) { return []; }
+}
+
+function tenantsFind(tenantId) {
+  for (var i = 0; i < tenantsAll.length; i++) {
+    if (tenantsAll[i].tenant_id === tenantId) return tenantsAll[i];
+  }
+  return null;
+}
+
+function tenantsEdit(tenantId) {
+  var t = tenantsFind(tenantId);
+  if (!t) return;
+
+  function fi(id, label, val, type) {
+    return '<div class="form-group"><label>' + label + '</label>' +
+      '<input id="' + id + '" type="' + (type || 'text') + '" value="' + tnE(val || '') + '"></div>';
+  }
+  // Calendar date field — coerces the stored value to YYYY-MM-DD for the picker.
+  function fdate(id, label, val) {
+    return '<div class="form-group"><label>' + label + '</label>' +
+      '<input id="' + id + '" type="date" value="' + tnE(toDateInput(val)) + '"></div>';
+  }
+  function fsel(id, label, val, opts) {
+    var ops = '';
+    for (var i = 0; i < opts.length; i++) {
+      ops += '<option' + (opts[i] === val ? ' selected' : '') + '>' + opts[i] + '</option>';
+    }
+    return '<div class="form-group"><label>' + label + '</label><select id="' + id + '">' + ops + '</select></div>';
+  }
+  function sec(txt) {
+    return '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);margin:14px 0 4px;padding-bottom:4px;border-bottom:1px solid var(--border);">' + txt + '</div>';
+  }
+
+  openModal(
+    '<div class="modal-header"><span class="modal-title">✏️ Edit Tenant — ' + tnE(t.unit_id) + '</span>' +
+    '<button class="modal-close" onclick="upBackToProfile(\'' + tnE(t.unit_id) + '\')">✕</button></div>' +
+    '<div class="modal-body" style="max-height:75vh;overflow-y:auto">' +
+
+    sec('Names') +
+    fi('te-name','Name(s) 01-02 *',t.name) +
+    fi('te-name2','Name(s) 03-04',t.name2) +
+
+    sec('Contact & Work') +
+    '<div class="form-row">' + fi('te-phone','Phone',t.phone) + fi('te-phone2','Phone 2',t.phone2) + '</div>' +
+    '<div class="form-row">' + fi('te-email','Email',t.email,'email') + fi('te-work','Work',t.work) + '</div>' +
+    fi('te-address','Address',t.address) +
+
+    sec('Residency') +
+    '<div class="form-row">' + fdate('te-movein','Move-in Date',t.move_in_date) + fdate('te-moveout','Move-out Date',t.move_out_date) + '</div>' +
+    '<div class="form-row">' + fi('te-adults','Adults',t.adults,'number') + fi('te-kids','Kids',t.kids,'number') + '</div>' +
+    '<div class="form-row">' +
+      fsel('te-cd','Caution Deposit Paid?',t.caution_deposit || '',['','Yes','No']) +
+      fi('te-cdamt','CD Amount',t.caution_amount) +
+    '</div>' +
+    fsel('te-idproof','ID Proof Submitted?',t.id_proof || '',['','Yes','No']) +
+    '<div class="form-row">' +
+      fsel('te-wa','In WhatsApp Group?',t.whatsapp_group || '',['','Yes','No']) +
+      fi('te-wa1','WA Phone 1',t.wa_phone1) +
+    '</div>' +
+    fi('te-wa2','WA Phone 2',t.wa_phone2) +
+    fi('te-comment','Comment',t.comment) +
+    fi('te-pic','Profile Picture URL',t.profile_picture) +
+
+    sec('Names on Bank Statement') +
+    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">As they appear in bank narrations — used for auto-matching payments.</div>' +
+    '<div id="te-banks"></div>' +
+    '<button class="btn btn-sm btn-outline" onclick="ownersAddDynInput(\'te-banks\',\'te-bank-inp\',\'e.g. RAHUL KUMAR\',\'\')" style="margin-bottom:6px">+ Add bank name</button>' +
+
+    sec('Vehicles') +
+    '<div class="form-row">' + fi('te-n4w','No. of 4-Wheelers',t.num_4w,'number') + fi('te-n2w','No. of 2-Wheelers',t.num_2w,'number') + '</div>' +
+    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Format: REG / MAKE / MODEL / COLOUR</div>' +
+    '<div style="font-size:12px;font-weight:700;margin:4px 0 2px">4-Wheelers</div>' +
+    '<div id="te-v4"></div>' +
+    '<button class="btn btn-sm btn-outline" onclick="ownersAddDynInput(\'te-v4\',\'te-v4-inp\',\'KL01AB1234/Make/Model/Colour\',\'\')" style="margin-bottom:6px">+ Add 4-wheeler</button>' +
+    '<div style="font-size:12px;font-weight:700;margin:4px 0 2px">2-Wheelers</div>' +
+    '<div id="te-v2"></div>' +
+    '<button class="btn btn-sm btn-outline" onclick="ownersAddDynInput(\'te-v2\',\'te-v2-inp\',\'KL01CD5678/Make/Model/Colour\',\'\')" style="margin-bottom:6px">+ Add 2-wheeler</button>' +
+
+    '<div class="form-actions">' +
+      '<button class="btn btn-outline" onclick="upBackToProfile(\'' + tnE(t.unit_id) + '\')">Cancel</button>' +
+      '<button class="btn btn-accent" onclick="tenantsSave(\'' + tnE(tenantId) + '\')">💾 Save</button>' +
+    '</div></div>'
+  );
+
+  var bn = (t.bank_name || '').split(',');
+  for (var i = 0; i < bn.length; i++) {
+    var v = bn[i].trim();
+    if (v) ownersAddDynInput('te-banks', 'te-bank-inp', 'e.g. RAHUL KUMAR', v);
+  }
+  var v4list = tnParseVehicles(t.vehicle_4w);
+  for (var i = 0; i < v4list.length; i++) {
+    ownersAddDynInput('te-v4', 'te-v4-inp', 'KL01AB1234/Make/Model/Colour', ownersVehicleStr(v4list[i]));
+  }
+  var v2list = tnParseVehicles(t.vehicle_2w);
+  for (var i = 0; i < v2list.length; i++) {
+    ownersAddDynInput('te-v2', 'te-v2-inp', 'KL01CD5678/Make/Model/Colour', ownersVehicleStr(v2list[i]));
+  }
+}
+
+function tenantsSave(tenantId) {
+  function gv(id) { var e = document.getElementById(id); return e ? e.value.trim() : ''; }
+  var data = {
+    tenant_id: tenantId,
+    name:  gv('te-name'),  name2: gv('te-name2'),
+    phone: gv('te-phone'), phone2: gv('te-phone2'),
+    email: gv('te-email'), work: gv('te-work'), address: gv('te-address'),
+    move_in_date: gv('te-movein'), move_out_date: gv('te-moveout'),
+    adults: gv('te-adults'), kids: gv('te-kids'),
+    caution_deposit: gv('te-cd'), caution_amount: gv('te-cdamt'),
+    id_proof: gv('te-idproof'),
+    whatsapp_group: gv('te-wa'), wa_phone1: gv('te-wa1'), wa_phone2: gv('te-wa2'),
+    comment: gv('te-comment'), profile_picture: gv('te-pic'),
+    num_4w: gv('te-n4w'), num_2w: gv('te-n2w'),
+    bank_name: ownersDynValues('te-bank-inp').join(', '),
+    vehicle_4w: JSON.stringify(ownersDynValues('te-v4-inp').map(ownersVehicleObj)),
+    vehicle_2w: JSON.stringify(ownersDynValues('te-v2-inp').map(ownersVehicleObj))
+  };
+  if (!data.name) { showToast('Tenant name is required','error'); return; }
+
+  google.script.run
+    .withSuccessHandler(function(r) {
+      if (r && r.success) { showToast('Tenant saved!','success'); closeModalForce(); var tt = tenantsFind(tenantId); tenantsAll = []; if (tt && tt.unit_id) setTimeout(function(){ openUnitProfile(tt.unit_id); }, 150); if (typeof loadUnits === 'function') loadUnits(); }
+      else { showToast((r && r.error) || 'Failed','error'); }
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e,'error'); })
+    .doPost_internal('tenants.update', data);
+}
+
+function tenantsOpenEditSafe(tenantId) {
+  if (tenantsFind(tenantId)) { tenantsEdit(tenantId); return; }
+  showToast('Loading tenant\u2026', '');
+  google.script.run
+    .withSuccessHandler(function(r) {
+      tenantsAll = (r && r.success && r.data) ? r.data : [];
+      if (tenantsFind(tenantId)) tenantsEdit(tenantId);
+      else showToast('Tenant not found', 'error');
+    })
+    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
+    .doPost_internal('tenants.getAll', {});
+}
+
+// Generic photo viewer for the unit profile avatars
+function upShowPhoto(url, title) {
+  if (!url) return;
+  var img = ownersPhotoUrl(url);
+  openModal(
+    '<div class="modal-header"><span class="modal-title">\ud83d\udcf7 ' + owE(title || 'Photo') + '</span>' +
+    '<button class="modal-close" onclick="closeModalForce()">\u2715</button></div>' +
+    '<div class="modal-body" style="text-align:center">' +
+      '<img src="' + owE(img) + '" alt="Photo" style="max-width:100%;max-height:60vh;border-radius:var(--radius-md)" ' +
+        'onerror="this.style.display=\'none\';document.getElementById(\'up-photo-fail\').style.display=\'block\'">' +
+      '<div id="up-photo-fail" style="display:none;padding:30px;color:var(--text-muted)">Preview unavailable.<br><br>' +
+        '<a href="' + owE(url) + '" target="_blank" class="btn btn-accent btn-sm">Open in Google Drive \ud83d\udd17</a></div>' +
+      '<div style="margin-top:14px"><button class="btn btn-outline btn-sm" onclick="closeModalForce()">Close</button></div>' +
+    '</div>');
+}
+
+</script>
