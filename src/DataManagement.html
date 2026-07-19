@@ -25,6 +25,38 @@ function dmToggleCard(headEl) {
 }
 </script>
 
+<!-- ═══════════ Historic Owners & Residents Import ═══════════ -->
+<div class="card collapsed" style="margin-bottom:20px;">
+  <div class="card-header" onclick="dmToggleCard(this)">
+    <span class="card-title">🕓 Import Historic Owners &amp; Residents (Excel)</span>
+    <span class="dm-chevron">+</span>
+  </div>
+  <div class="card-body">
+    <div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;font-size:13px;line-height:1.6;">
+      <strong>💡 What this does:</strong> Loads past owners and past residents into each unit's
+      <strong>🕓 History</strong> sections on the Unit Profile — for reference only.
+      Current owner/resident records are <strong>not</strong> touched.<br>
+      Upload the reviewed workbook with its two tabs — <strong>Owners History</strong> and
+      <strong>Residents History</strong>. Columns are matched by their headers, so the extra
+      Work/Employer and Vehicle columns are picked up automatically. Re-importing the same file is
+      safe — it replaces the previously-imported history instead of duplicating it.
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+      <div style="flex:1;min-width:220px;">
+        <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px;">History workbook (.xlsx — two tabs)</label>
+        <input type="file" id="history-file-input" accept=".xls,.xlsx"
+          style="display:block;width:100%;padding:8px 10px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);font-size:13px;">
+      </div>
+      <button class="btn btn-accent" id="history-import-btn"
+        onclick="try { historyXlsxImport(); } catch(e) { alert('Import button error: ' + e.message); }"
+        style="flex-shrink:0;height:38px;">
+        📥 Import History
+      </button>
+    </div>
+    <div id="history-import-status"></div>
+  </div>
+</div>
+
 <!-- ═══════════ One-click Owners.xlsx Import ═══════════ -->
 <div class="card collapsed" style="margin-bottom:20px;">
   <div class="card-header" onclick="dmToggleCard(this)">
@@ -353,6 +385,66 @@ function tenantsXlsxImport() {
   };
   if (ext === 'csv') reader.readAsText(file);
   else reader.readAsArrayBuffer(file);
+}
+
+// ── Historic Owners & Residents import (two-tab .xlsx) ──────────
+function historyXlsxImport() {
+  dmStatusBox('history-import-status', '⏳ Checking file…', 'info');
+  var inp = document.getElementById('history-file-input');
+  if (!inp || !inp.files || inp.files.length === 0) {
+    dmStatusBox('history-import-status', '⚠️ Please select the history workbook first.', 'warn');
+    return;
+  }
+  var file = inp.files[0];
+  var ext  = file.name.split('.').pop().toLowerCase();
+  if (ext !== 'xls' && ext !== 'xlsx') {
+    dmStatusBox('history-import-status', '❌ Please upload the .xlsx workbook (with both tabs).', 'error');
+    return;
+  }
+  var btn = document.getElementById('history-import-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Reading…'; }
+  dmStatusBox('history-import-status', '⏳ Reading ' + file.name + '…', 'info');
+
+  var reader = new FileReader();
+  reader.onerror = function() {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 Import History'; }
+    dmStatusBox('history-import-status', '❌ Could not read the file. Please try again.', 'error');
+  };
+  reader.onload = function(ev) {
+    var payload;
+    try {
+      var arr = new Uint8Array(ev.target.result);
+      var bin = '';
+      for (var i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+      payload = { content: btoa(bin), filename: file.name };
+    } catch (convErr) {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Import History'; }
+      dmStatusBox('history-import-status', '❌ Could not prepare the file: ' + convErr.message, 'error');
+      return;
+    }
+    if (btn) btn.textContent = '⏳ Importing…';
+    dmStatusBox('history-import-status', '⏳ Server is converting the workbook and writing history…', 'info');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Import History'; }
+        if (!res || !res.success) {
+          dmStatusBox('history-import-status', '❌ Import failed: ' + (res ? res.error : 'no response'), 'error');
+          return;
+        }
+        var r = res.data || {};
+        dmStatusBox('history-import-status',
+          '✓ Done. <strong>' + (r.owners || 0) + '</strong> owner history entries across ' +
+          (r.ownerUnits || 0) + ' units, and <strong>' + (r.residents || 0) +
+          '</strong> resident history entries across ' + (r.residentUnits || 0) +
+          ' units. Open a Unit Profile → 🕓 View History to see them.', 'success');
+      })
+      .withFailureHandler(function(e) {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Import History'; }
+        dmStatusBox('history-import-status', '❌ Error: ' + (e && e.message ? e.message : e), 'error');
+      })
+      .importHistoryFile(payload);
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 function ownersXlsxImport() {
