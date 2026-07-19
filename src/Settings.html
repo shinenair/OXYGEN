@@ -398,7 +398,7 @@ function settingsRender(schema) {
       '<div id="dz-caretaker-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-caretaker-months-status" style="margin-top:8px;"></div>') +
 
     dzBlock('sg-danger-resetall', '🗑', 'Reset ALL Payment Data',
-      'Deletes ALL Bank Statement transactions and ALL Fees Received payment records at once, for a full fresh-start test. Owners, Residents, Units, Settings and Categories are NOT touched.',
+      'Deletes ALL Bank Statement transactions (BOTH accounts — main IOB and IOB LPG) and ALL Fees Received payment records at once, for a full fresh-start test. Owners, Residents, Units, Settings and Categories are NOT touched.',
       '<button class="btn btn-outline btn-sm" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="settingsResetPayments()">🗑 Reset ALL Payment Data</button>') +
 
     dzBlock('sg-danger-owners', '👤', 'Delete ALL Owners',

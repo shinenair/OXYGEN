@@ -535,7 +535,11 @@ var ApiRouter = (function() {
   function _resetPaymentData() {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var out = {};
-    ['BankStatements', 'Payments'].forEach(function(name) {
+    // BOTH bank accounts — the main IOB account and the IOB LPG account
+    // (BankStatements2) — plus the fees ledger. "ALL" must mean all:
+    // leaving account 2 behind kept its rows visible in unit profiles
+    // and reconciliation after a "full reset".
+    ['BankStatements', 'BankStatements2', 'Payments'].forEach(function(name) {
       var sh = ss.getSheetByName(name);
       if (!sh) { out[name] = 0; return; }
       var last = sh.getLastRow();
