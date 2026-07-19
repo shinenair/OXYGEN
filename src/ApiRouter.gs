@@ -553,9 +553,11 @@ var ApiRouter = (function() {
         map[mk][key] = m.count || 0;
       });
     }
-    add(PaymentsService.getMonthSummary(), 'payments');
-    add(BankService.getMonthSummary(), 'bank1');
-    try { add(Bank2Service.getMonthSummary(), 'bank2'); } catch (e) {} // account 2 sheet may not exist yet
+    // Each source is wrapped independently — one failing service (e.g. a
+    // sheet that doesn't exist yet) must not blank the whole table.
+    try { add(PaymentsService.getMonthSummary(), 'payments'); } catch (e1) {}
+    try { add(BankService.getMonthSummary(), 'bank1'); } catch (e2) {}
+    try { add(Bank2Service.getMonthSummary(), 'bank2'); } catch (e3) {}
     var out = [];
     for (var k in map) out.push(map[k]);
     out.sort(function(a, b) { return a.month < b.month ? -1 : 1; });

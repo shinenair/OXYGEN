@@ -681,9 +681,13 @@ function dzLoadAllMonthTables() {
 var DZ_MN = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function dzLoadFinancialMonthTable() {
   google.script.run.withSuccessHandler(function(r) {
-    var list = (r && r.success && r.data) ? r.data : [];
     var el = document.getElementById('dz-financial-months');
     if (!el) return;
+    if (!r || !r.success) {
+      el.innerHTML = '<div style="color:var(--c-rejected-fg);font-size:12px;">Could not load: ' + ((r && r.error) || 'no response') + '</div>';
+      return;
+    }
+    var list = r.data || [];
     if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No financial data recorded yet.</div>'; return; }
     var byYear = {};
     list.forEach(function(m) { var y = m.month.split('-')[0]; (byYear[y] = byYear[y] || []).push(m); });
@@ -713,6 +717,9 @@ function dzLoadFinancialMonthTable() {
       h += '</tbody></table></div></div>';
     });
     el.innerHTML = h;
+  }).withFailureHandler(function(e) {
+    var el = document.getElementById('dz-financial-months');
+    if (el) el.innerHTML = '<div style="color:var(--c-rejected-fg);font-size:12px;">Load failed: ' + (e && e.message ? e.message : e) + '</div>';
   }).doPost_internal('admin.getFinancialMonthSummary', {});
 }
 
