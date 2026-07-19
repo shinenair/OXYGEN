@@ -53,10 +53,91 @@ var ApiRouter = (function() {
     throw new Error('Access denied — OXYGEN is a private application of the Confident Daffodils Owners Association. Reload the page and enter your PIN, or contact an Administrator.');
   }
 
+  // ── Response cache ─────────────────────────────────────────────
+  // The slow primitive here is reading whole sheets, so the heaviest
+  // read routes cache their finished response for a short window.
+  // Correctness rules:
+  //   • Only the whitelisted routes below are ever cached — all serve
+  //     the same member-wide data to every allowed user, none are
+  //     role-filtered, and auth (_requireMember) still runs on every
+  //     request BEFORE the cache is consulted.
+  //   • ANY successful non-read action bumps a version stamp that is
+  //     part of every cache key, so an edit invalidates everything at
+  //     once — a member can never read pre-edit data after a write.
+  //   • The short TTL (3 min) additionally bounds staleness from edits
+  //     made directly in the spreadsheet, which the app can't see.
+  //   • Cache failures of any kind fall through to a normal dispatch.
+  var CACHEABLE = {
+    'units.getAll': 1, 'owners.getAll': 1, 'tenants.getAll': 1,
+    'payments.getAll': 1, 'units.profile': 1, 'dashboard.data': 1,
+    'occupancy.getYearViewForAll': 1, 'lpg.getMonth': 1, 'bank.getAll': 1
+  };
+  var CACHE_TTL_SEC = 180;
+  var CHUNK_CHARS = 30000;      // ≤90KB even if every char were 3 UTF-8 bytes
+  var MAX_CACHE_CHARS = 800000; // beyond this, just don't cache
+
+  function _rcVer(cache) {
+    return cache.get('rc_ver') || '0';
+  }
+  function _rcBump() {
+    try { CacheService.getScriptCache().put('rc_ver', String(Date.now()), 21600); } catch (e) {}
+  }
+  function _rcKey(cache, action, data) {
+    var sig = Utilities.base64Encode(
+      Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(data || {})));
+    return 'rc_' + _rcVer(cache) + '_' + action + '_' + sig;
+  }
+  function _rcGet(cache, key) {
+    var n = cache.get(key + '_n');
+    if (!n) return null;
+    var keys = [];
+    for (var i = 0; i < Number(n); i++) keys.push(key + '_' + i);
+    var got = cache.getAll(keys);
+    var out = '';
+    for (var j = 0; j < Number(n); j++) {
+      var part = got[key + '_' + j];
+      if (part === undefined || part === null) return null; // a chunk expired — treat as miss
+      out += part;
+    }
+    return out;
+  }
+  function _rcPut(cache, key, str) {
+    if (str.length > MAX_CACHE_CHARS) return;
+    var n = Math.ceil(str.length / CHUNK_CHARS) || 1;
+    var obj = {};
+    for (var i = 0; i < n; i++) obj[key + '_' + i] = str.substr(i * CHUNK_CHARS, CHUNK_CHARS);
+    obj[key + '_n'] = String(n);
+    cache.putAll(obj, CACHE_TTL_SEC);
+  }
+  // Read = never bumps the version. Conservative on purpose: anything
+  // not clearly a read is treated as a write (worst case: a needless
+  // invalidation, never stale data).
+  function _isReadAction(a) {
+    return CACHEABLE[a] === 1 || PUBLIC_ACTIONS[a] === 1 ||
+      /\.(get|list|history|profile|stats|reconcile|search)/.test(String(a));
+  }
+
   function route(action, data) {
     try {
       if (!PUBLIC_ACTIONS[action]) _requireMember(action);
+
+      if (CACHEABLE[action] === 1) {
+        try {
+          var cache = CacheService.getScriptCache();
+          var key = _rcKey(cache, action, data);
+          var hit = _rcGet(cache, key);
+          if (hit) return JSON.parse(hit);
+          var freshResult = _dispatch(action, data);
+          var wrapped = { success: true, data: freshResult };
+          try { _rcPut(cache, key, JSON.stringify(wrapped)); } catch (ePut) {}
+          return wrapped;
+        } catch (eCache) {
+          // Any cache-layer surprise: fall through to a plain dispatch.
+        }
+      }
+
       var result = _dispatch(action, data);
+      if (!_isReadAction(action)) _rcBump();
       return { success: true, data: result };
     } catch (err) {
       Logger.log('ApiRouter error [' + action + ']: ' + err.message);
