@@ -860,6 +860,15 @@ function upBackToProfile(unitId) {
   setTimeout(function() { openUnitProfile(unitId, true); }, 120);
 }
 
+// Same, but WITHOUT the forced re-fetch — for pure viewing detours
+// (like the big photo) where nothing could have changed: the profile
+// reopens instantly from the session cache, and the cached open's own
+// background refresh still keeps it honest.
+function upBackToProfileCached(unitId) {
+  closeModalForce();
+  setTimeout(function() { openUnitProfile(unitId); }, 120);
+}
+
 // Save the occupancy / registration flags, then re-render the profile so the
 // banner colour, ribbon and fee notes update immediately.
 function upSaveFlags(unitId) {
@@ -1246,16 +1255,18 @@ function upRenderPayments() {
     '</div>';
 }
 
-// Full-size picture window; Close returns to the Unit Full Profile.
+// Full-size picture window; Close returns to the Unit Full Profile —
+// via the CACHED reopen (viewing a photo changes nothing, so paying a
+// full server re-fetch on close made it feel slow).
 function upShowBigPhoto(link, unitId) {
   var url = _upPhotoUrl(link).replace('sz=w400', 'sz=w1200');
   openModal(
     '<div class="modal-header"><span class="modal-title">📷 ' + _e(unitId) + ' — Profile Photo</span>' +
-    '<button class="modal-close" onclick="upBackToProfile(\'' + _e(unitId) + '\')">✕</button></div>' +
+    '<button class="modal-close" onclick="upBackToProfileCached(\'' + _e(unitId) + '\')">✕</button></div>' +
     '<div class="modal-body" style="text-align:center;">' +
       '<img src="' + _e(url) + '" style="max-width:100%;max-height:70vh;border-radius:12px;" ' +
         'onerror="this.replaceWith(document.createTextNode(\'Could not load the photo.\'))">' +
-      '<div style="margin-top:14px;"><button class="btn btn-outline" onclick="upBackToProfile(\'' + _e(unitId) + '\')">Close — back to profile</button></div>' +
+      '<div style="margin-top:14px;"><button class="btn btn-outline" onclick="upBackToProfileCached(\'' + _e(unitId) + '\')">Close — back to profile</button></div>' +
     '</div>');
 }
 
