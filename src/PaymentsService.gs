@@ -104,7 +104,12 @@ var PaymentsService = (function() {
     var rows = Database.getAll(SHEET);
     var counts = {};
     for (var i = 0; i < rows.length; i++) {
-      var m = String(rows[i][C.MONTH] || '').trim();
+      // Normalize the same way _toObj / the Fees Received page does: the
+      // month is stored apostrophe-prefixed and Sheets often returns it
+      // as a Date or unpadded string. Reading it raw produced keys like
+      // "Sun Jan 01 2024…" that never matched the bank's YYYY-MM keys, so
+      // payment counts vanished from the combined month table.
+      var m = _normMonth(rows[i][C.MONTH]);
       if (!m) continue;
       counts[m] = (counts[m] || 0) + 1;
     }
@@ -136,8 +141,12 @@ var PaymentsService = (function() {
     var sheet = Database.getSheet(SHEET);
     var rows = Database.getAll(SHEET);
     var deleted = 0;
+    // Normalize the stored month (Date / unpadded / apostrophe-prefixed)
+    // before comparing — a raw string compare missed rows Sheets returns
+    // as Dates, so a "delete this month" reported success while leaving
+    // those fee records behind (also affected the bank-delete cascade).
     for (var i = rows.length - 1; i >= 0; i--) {
-      if (String(rows[i][C.MONTH] || '').trim() === monthKey) { sheet.deleteRow(i + 2); deleted++; }
+      if (_normMonth(rows[i][C.MONTH]) === monthKey) { sheet.deleteRow(i + 2); deleted++; }
     }
     return { success: true, deleted: deleted };
   }
