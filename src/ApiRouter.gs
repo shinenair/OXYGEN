@@ -245,8 +245,13 @@ var ApiRouter = (function() {
         } catch (e2) {} // account 2 sheet may not exist yet — main account alone is fine
         return {
           unit:     UnitsService.getUnitById(data.unit_id),
-          owners:   OwnersService.getOwnersByUnit(data.unit_id),
-          tenants:  TenantsService.getTenantsByUnit(data.unit_id),
+          // _ensurePhotoSharing here too — THIS is the route the Full
+          // Profile actually loads through, not owners/tenants.getByUnit.
+          // A private photo's thumbnail needs the viewer's Google
+          // cookies (blocked inside the embedded frame by Firefox);
+          // once link-shared it loads cookie-free in every browser.
+          owners:   _ensurePhotoSharing(OwnersService.getOwnersByUnit(data.unit_id)),
+          tenants:  _ensurePhotoSharing(TenantsService.getTenantsByUnit(data.unit_id)),
           payments: PaymentsService.getPaymentsByUnit(data.unit_id),
           bank:     profileBank
         };
