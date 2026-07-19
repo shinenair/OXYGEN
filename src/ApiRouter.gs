@@ -676,13 +676,19 @@ var ApiRouter = (function() {
                b: tn.bank_name || '' };
     });
 
-    // Reconciliation summary: does the ledger match the bank's own balances?
-    var recon = { total: 0, bad: 0, badMonths: [] };
+    // Reconciliation summary: does the ledger match the bank's own
+    // balances? The COMPUTATION must walk the full history (opening
+    // balances chain across year boundaries), but the SUMMARY counts
+    // only the viewed year's months — the tile describes the year on
+    // screen, not the whole database.
+    var recon = { total: 0, bad: 0, badMonths: [], year: activeYear };
     try {
       var rec = BankService.reconcile(allTxns); // full history, needed for correctness — NOT the year-filtered view
-      recon.total = rec.length;
       for (var rr = 0; rr < rec.length; rr++) {
-        if (!rec[rr].ok) { recon.bad++; if (recon.badMonths.length < 4) recon.badMonths.push(rec[rr].month); }
+        if (String(rec[rr].month).indexOf(activeYear + '-') !== 0) continue;
+        recon.total++;
+        if (!rec[rr].ok) recon.bad++;
+        if (!rec[rr].ok) recon.badMonths.push(rec[rr].month);
       }
     } catch (recErr) {}
 

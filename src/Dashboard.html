@@ -376,18 +376,23 @@ function dashRender() {
 }
 
 // Ledger-vs-Bank reconciliation tile — click for the full monthly report.
+// Scoped to the year being viewed: counts and month names describe only
+// that year's months, not every month in the database.
 function dashReconTile() {
   var r = (dashData && dashData.recon) || { total: 0, bad: 0, badMonths: [] };
+  var MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function mon(k) { var m = parseInt(String(k).slice(5, 7), 10); return MN[m - 1] || k; }
+  var yr = r.year || '';
   var ok = r.total > 0 && r.bad === 0;
   var cls = r.total === 0 ? 'info' : (ok ? 'green' : 'red');
   var val = r.total === 0 ? '—' : (ok ? '✅ OK' : '⚠️ ' + r.bad);
-  var sub = r.total === 0 ? 'no bank data yet'
-          : ok ? 'all ' + r.total + ' months match IOB'
-          : 'mismatch: ' + r.badMonths.join(', ');
+  var sub = r.total === 0 ? 'no bank data for ' + yr
+          : ok ? 'all ' + r.total + ' month' + (r.total === 1 ? '' : 's') + ' of ' + yr + ' match IOB'
+          : 'mismatch in ' + yr + ': ' + r.badMonths.map(mon).join(', ');
   return '<div class="stat-card ' + cls + '" style="cursor:pointer" ' +
-    'title="OXYGEN ledger vs IOB stated balances — click for the month-by-month report" ' +
+    'title="OXYGEN ledger vs IOB stated balances for ' + yr + ' — click for the month-by-month report" ' +
     'onclick="if (typeof bankReconcile === \'function\') bankReconcile();">' +
-    '<div class="stat-label">Ledger vs Bank</div>' +
+    '<div class="stat-label">Ledger vs Bank — ' + yr + '</div>' +
     '<div class="stat-value" style="font-size:20px">' + val + '</div>' +
     '<div class="stat-sub">' + sub + '</div></div>';
 }
