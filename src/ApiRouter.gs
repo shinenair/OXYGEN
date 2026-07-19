@@ -174,7 +174,7 @@ var ApiRouter = (function() {
   // Actions only Administrators may perform — enforced on the SERVER,
   // so hiding menus in the browser is cosmetic, not the security boundary.
   var ADMIN_ACTIONS = {
-    'admin.resetPaymentData': 1,
+    'admin.getFinancialMonthSummary': 1, 'admin.deleteFinancialMonth': 1,
     'users.list': 1, 'users.add': 1, 'users.setRole': 1, 'users.remove': 1,
     'lpg.setRate': 1, 'lpg.deleteRate': 1, 'lpg.importReadings': 1,
     'lpgInv.addInward': 1, 'lpgInv.deleteInward': 1, 'lpgInv.addOutward': 1, 'lpgInv.deleteOutward': 1,
@@ -354,6 +354,11 @@ var ApiRouter = (function() {
       case 'admin.deleteBankByMonth':         return BankService.deleteByMonth(data.month);
       case 'admin.getBank2MonthSummary':      return Bank2Service.getMonthSummary();
       case 'admin.deleteBank2ByMonth':        return Bank2Service.deleteByMonth(data.month);
+      // Combined per-month financial view + surgical delete: one month's
+      // Fees Received + BOTH bank accounts at once (replaces the old
+      // single-shot "Reset ALL Payment Data").
+      case 'admin.getFinancialMonthSummary':  return _financialMonthSummary();
+      case 'admin.deleteFinancialMonth':      return _deleteFinancialMonth(data.month);
       case 'admin.getLpgReadingsMonthSummary': return LPGReadingService.getMonthSummary();
       case 'admin.deleteLpgReadingsByMonth':  return LPGReadingService.deleteReadingsByMonth(data.year, data.month);
       case 'admin.getLpgInwardMonthSummary':  return LPGInventoryService.getInwardMonthSummary();
@@ -495,7 +500,6 @@ var ApiRouter = (function() {
       case 'lpgInv.getStockSummary':      return LPGInventoryService.getStockSummary();
       case 'lpgInv.getComparison':        return LPGInventoryService.getLiveComparison();
       case 'lpgInv.getMonthlyPL':   return LPGInventoryService.getMonthlyPL(data.year, data.month);
-      case 'admin.resetPaymentData': return _resetPaymentData();
 
       // Dashboard — one bundled payload for the whole dashboard
       case 'dashboard.data':   return _dashboardData(data.year);
@@ -535,23 +539,46 @@ var ApiRouter = (function() {
   }
 
 
-  // ── DANGER: wipe payment data (Bank ledger + Fees ledger) for a fresh
-  // test import. Owners, Tenants, Units, Settings, Categories are untouched.
-  function _resetPaymentData() {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var out = {};
-    // BOTH bank accounts — the main IOB account and the IOB LPG account
-    // (BankStatements2) — plus the fees ledger. "ALL" must mean all:
-    // leaving account 2 behind kept its rows visible in unit profiles
-    // and reconciliation after a "full reset".
-    ['BankStatements', 'BankStatements2', 'Payments'].forEach(function(name) {
-      var sh = ss.getSheetByName(name);
-      if (!sh) { out[name] = 0; return; }
-      var last = sh.getLastRow();
-      if (last > 1) sh.deleteRows(2, last - 1);
-      out[name] = Math.max(0, last - 1);
-    });
-    return { cleared: out };
+  // ── DANGER: surgical per-month financial reset ───────────────────
+  // One unified view of every month present in the financial data, with
+  // per-source counts, and a delete that clears ONE month across Fees
+  // Received + BOTH bank accounts at once. Replaces the old single-shot
+  // "Reset ALL Payment Data" with controlled, month-by-month cleanup.
+  function _financialMonthSummary() {
+    var map = {};
+    function add(list, key) {
+      (list || []).forEach(function(m) {
+        var mk = String(m.month);
+        if (!map[mk]) map[mk] = { month: mk, payments: 0, bank1: 0, bank2: 0 };
+        map[mk][key] = m.count || 0;
+      });
+    }
+    add(PaymentsService.getMonthSummary(), 'payments');
+    add(BankService.getMonthSummary(), 'bank1');
+    try { add(Bank2Service.getMonthSummary(), 'bank2'); } catch (e) {} // account 2 sheet may not exist yet
+    var out = [];
+    for (var k in map) out.push(map[k]);
+    out.sort(function(a, b) { return a.month < b.month ? -1 : 1; });
+    return out;
+  }
+
+  function _deleteFinancialMonth(monthKey) {
+    monthKey = String(monthKey || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(monthKey)) throw new Error('Invalid month key: ' + monthKey);
+    // Bank deletes cascade to that month's posted Fees Received + portions.
+    var bank1 = BankService.deleteByMonth(monthKey);
+    var bank2 = { deleted: 0, paymentsDeleted: 0 };
+    try { bank2 = Bank2Service.deleteByMonth(monthKey); } catch (e) {}
+    // Sweep any remaining Fees Received for the month — manual entries that
+    // were never posted from a bank line, so the two cascades missed them.
+    var pay = PaymentsService.deleteByMonth(monthKey);
+    return {
+      month: monthKey,
+      bank1: bank1.deleted || 0,
+      bank2: bank2.deleted || 0,
+      paymentsFromBank: (bank1.paymentsDeleted || 0) + (bank2.paymentsDeleted || 0),
+      paymentsManual: pay.deleted || 0
+    };
   }
 
   // For every unit, find whichever resident (current OR archived) had a

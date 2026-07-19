@@ -375,13 +375,9 @@ function settingsRender(schema) {
       '</div>'+
       '<div id="dz-restore-status" style="margin-top:8px;"></div>') +
 
-    dzBlock('sg-danger-bank', '🏦', 'Delete Bank Statement Data by Month',
-      'Removes every Transaction Ledger row for one month only, so it can be re-imported cleanly. Since Fees Received payments are posted FROM the bank statement, deleting a month here automatically deletes that same month\'s Fees Received records too — the two never end up disagreeing. Grouped by year — new years appear automatically as data for them exists.',
-      '<div id="dz-bank-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-bank-months-status" style="margin-top:8px;"></div>') +
-
-    dzBlock('sg-danger-bank2', '🔥', 'Delete IOB LPG Account Data by Month',
-      'Same as above, but for the second bank account (IOB LPG) — removes that account\'s Transaction Ledger rows for one month, including any Fees Received records posted from them, so the month can be re-imported cleanly.',
-      '<div id="dz-bank2-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-bank2-months-status" style="margin-top:8px;"></div>') +
+    dzBlock('sg-danger-financial-month', '🗑', 'Reset Financial Data by Month',
+      'Surgical monthly cleanup. Each row is one month; deleting it removes that month\'s Fees Received payments (including manual entries) AND both bank accounts’ transactions (Main IOB + IOB LPG), plus the portion allocations tied to them — so you can fix one bad month without wiping everything. No other month, and nothing outside Payments/Bank, is touched. Grouped by year; new years appear automatically.',
+      '<div id="dz-financial-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-financial-months-status" style="margin-top:8px;"></div>') +
 
     dzBlock('sg-danger-lpgread', '🔥', 'Delete LPG Readings by Month',
       'Removes every meter reading for one month only. Grouped by year, self-extending.',
@@ -396,10 +392,6 @@ function settingsRender(schema) {
     dzBlock('sg-danger-caretaker', '🧾', 'Delete Caretaker Expenses by Month',
       'Removes every Caretaker petty-cash expense entry for one month only, so it can be re-imported cleanly. Does not touch Reserve Money (that\'s pulled live from the Bank Statement, not stored separately) or the starting balance seed.',
       '<div id="dz-caretaker-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-caretaker-months-status" style="margin-top:8px;"></div>') +
-
-    dzBlock('sg-danger-resetall', '🗑', 'Reset ALL Payment Data',
-      'Deletes ALL Bank Statement transactions (BOTH accounts — main IOB and IOB LPG) and ALL Fees Received payment records at once, for a full fresh-start test. Owners, Residents, Units, Settings and Categories are NOT touched.',
-      '<button class="btn btn-outline btn-sm" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="settingsResetPayments()">🗑 Reset ALL Payment Data</button>') +
 
     dzBlock('sg-danger-owners', '👤', 'Delete ALL Owners',
       'Removes every owner record from every unit. The archived owner history is NOT touched.',
@@ -678,12 +670,74 @@ function uaRemove(email) {
 
 // ── Danger Zone: monthly delete tables ─────────────────────────
 function dzLoadAllMonthTables() {
-  dzLoadMonthTable('dz-bank-months', 'admin.getBankMonthSummary', 'admin.deleteBankByMonth', 'transaction(s)', false);
-  dzLoadMonthTable('dz-bank2-months', 'admin.getBank2MonthSummary', 'admin.deleteBank2ByMonth', 'transaction(s)', false);
+  dzLoadFinancialMonthTable();
   dzLoadMonthTable('dz-lpgread-months', 'admin.getLpgReadingsMonthSummary', 'admin.deleteLpgReadingsByMonth', 'reading(s)', true);
   dzLoadMonthTable('dz-inward-months', 'admin.getLpgInwardMonthSummary', 'admin.deleteLpgInwardByMonth', 'purchase record(s)', false);
   dzLoadMonthTable('dz-outward-months', 'admin.getLpgOutwardMonthSummary', 'admin.deleteLpgOutwardByMonth', 'usage record(s)', false);
   dzLoadMonthTable('dz-caretaker-months', 'caretaker.getMonthSummary', 'caretaker.deleteByMonth', 'expense entry(s)', false);
+}
+
+// ── Combined per-month financial table: Fees + both banks in one view ──
+var DZ_MN = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dzLoadFinancialMonthTable() {
+  google.script.run.withSuccessHandler(function(r) {
+    var list = (r && r.success && r.data) ? r.data : [];
+    var el = document.getElementById('dz-financial-months');
+    if (!el) return;
+    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No financial data recorded yet.</div>'; return; }
+    var byYear = {};
+    list.forEach(function(m) { var y = m.month.split('-')[0]; (byYear[y] = byYear[y] || []).push(m); });
+    var years = Object.keys(byYear).sort(function(a, b) { return b - a; });
+    var h = '';
+    years.forEach(function(y) {
+      var yid = 'dz-financial-months-y' + y;
+      h += '<div style="margin-bottom:6px;">' +
+        '<div onclick="dzToggleYear(\'' + yid + '\')" style="cursor:pointer;font-weight:700;font-size:12.5px;padding:6px 8px;background:var(--bg-surface2);border-radius:6px;display:flex;justify-content:space-between;">' +
+          '<span>' + y + ' (' + byYear[y].length + ' month' + (byYear[y].length !== 1 ? 's' : '') + ')</span>' +
+          '<span class="settings-toggle-chevron" id="' + yid + '-chev">+</span>' +
+        '</div>' +
+        '<div id="' + yid + '" class="dz-month-table" style="display:none;margin-top:4px;overflow-x:auto;"><table><thead><tr>' +
+          '<th>Month</th><th style="text-align:right;">Fees Received</th><th style="text-align:right;">Bank · Main IOB</th><th style="text-align:right;">Bank · IOB LPG</th><th>Action</th>' +
+        '</tr></thead><tbody>';
+      byYear[y].forEach(function(m) {
+        var parts = m.month.split('-');
+        var label = DZ_MN[parseInt(parts[1], 10)] + ' ' + parts[0];
+        function c(n) { return n ? n : '—'; }
+        h += '<tr><td style="font-weight:700">' + label + '</td>' +
+          '<td style="text-align:right;font-variant-numeric:tabular-nums;">' + c(m.payments) + '</td>' +
+          '<td style="text-align:right;font-variant-numeric:tabular-nums;">' + c(m.bank1) + '</td>' +
+          '<td style="text-align:right;font-variant-numeric:tabular-nums;">' + c(m.bank2) + '</td>' +
+          '<td><button class="btn btn-xs btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg)" ' +
+          'onclick="dzDeleteFinancialMonth(\'' + m.month + '\')">🗑 Delete</button></td></tr>';
+      });
+      h += '</tbody></table></div></div>';
+    });
+    el.innerHTML = h;
+  }).doPost_internal('admin.getFinancialMonthSummary', {});
+}
+
+function dzDeleteFinancialMonth(monthKey) {
+  var parts = monthKey.split('-');
+  var label = DZ_MN[parseInt(parts[1], 10)] + ' ' + parts[0];
+  var word = prompt('This permanently deletes ALL financial data for ' + label + ':\n' +
+    '  • Fees Received payments (including manual entries)\n' +
+    '  • Main IOB bank transactions\n' +
+    '  • IOB LPG bank transactions\n' +
+    '  • the portion allocations tied to them\n\n' +
+    'No other month is affected.\n\nType DELETE to confirm:');
+  if (word !== 'DELETE') { dzShowStatus('dz-financial-months', 'Cancelled — nothing was deleted.', ''); return; }
+  dzShowStatus('dz-financial-months', '⏳ Deleting ' + label + '…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) {
+      var d = r.data || {};
+      var feesTotal = (d.paymentsFromBank || 0) + (d.paymentsManual || 0);
+      dzShowStatus('dz-financial-months',
+        '✓ ' + label + ' cleared — ' + (d.bank1 || 0) + ' Main-IOB + ' + (d.bank2 || 0) +
+        ' IOB-LPG transaction(s), and ' + feesTotal + ' Fees Received record(s).', 'success');
+      dzLoadFinancialMonthTable();
+    } else dzShowStatus('dz-financial-months', '❌ ' + ((r && r.error) || 'Failed'), 'error');
+  }).withFailureHandler(function(e) { dzShowStatus('dz-financial-months', '❌ Error: ' + e, 'error'); })
+    .doPost_internal('admin.deleteFinancialMonth', { month: monthKey });
 }
 
 // monthIsYearMonth: true when the month string in the summary is "YYYY-M"
@@ -857,20 +911,6 @@ function dzStatusBox(elId, msg, type) {
   el.innerHTML = '<div style="font-size:12.5px;color:' + color + ';">' + msg + '</div>';
 }
 
-function settingsResetPayments() {
-  var word = prompt('This deletes EVERY bank transaction and EVERY fee payment record.\nOwners/Residents/Units are kept. This cannot be undone.\n\nType RESET to confirm:');
-  if (word !== 'RESET') { showToast('Reset cancelled', ''); return; }
-  showToast('Resetting…', '');
-  google.script.run
-    .withSuccessHandler(function(r) {
-      if (r && r.success) {
-        var c = (r.data && r.data.cleared) || {};
-        showToast('Cleared ' + (c.BankStatements || 0) + ' bank rows and ' + (c.Payments || 0) + ' payment rows', 'success');
-      } else { showToast((r && r.error) || 'Reset failed', 'error'); }
-    })
-    .withFailureHandler(function(e) { showToast('Error: ' + e, 'error'); })
-    .doPost_internal('admin.resetPaymentData', {});
-}
 
 function catLoad(kind) {
   var listEl = document.getElementById('cat-'+kind+'-list');
