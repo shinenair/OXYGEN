@@ -433,6 +433,8 @@ var PaymentsService = (function() {
     getPaymentStats:            getPaymentStats,
     updatePayment:              updatePayment,
     deleteRecord:               deleteRecord,
+    getMonthSummary:            getMonthSummary,
+    deleteByMonth:              deleteByMonth,
     allocateFromBankBatch:      allocateFromBankBatch
   };
 })();
