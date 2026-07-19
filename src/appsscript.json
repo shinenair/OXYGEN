@@ -1,5 +1,5 @@
 {
-  "timeZone": "America/Los_Angeles",
+  "timeZone": "Asia/Kolkata",
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
   "oauthScopes": [
