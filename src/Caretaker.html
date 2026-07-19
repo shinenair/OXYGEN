@@ -1,0 +1,432 @@
+<!-- Caretaker.html — Caretaker Ledger: reserve money (auto from bank) +
+     petty-cash expenses the caretaker makes directly. Data-entry surface;
+     the Caretaker's Monthly Report PDF is generated from the Reports page. -->
+<div class="page-head">
+  <div>
+    <h1 class="page-title">🧾 Caretaker Ledger</h1>
+    <p class="page-subtitle">Reserve money handed to the caretaker &amp; the petty-cash expenses paid from it</p>
+  </div>
+</div>
+
+<style>
+  .rep-table { border-collapse:collapse;width:100%; }
+  .rep-table th, .rep-table td { border:1px solid var(--border-strong, rgba(128,128,128,.35)); padding:7px 10px;font-size:12.5px; }
+  .rep-table th { background:var(--bg-surface2);font-weight:800;font-size:11px;text-align:left; }
+  .rep-table tr:hover td { background:rgba(0,200,150,.05); }
+  .rep-table tr:hover .edit-pencil { opacity:.55 !important; }
+  .rep-table .edit-pencil:hover { opacity:1 !important; }
+  .rep-table .edit-pencil { transition:opacity .12s; }
+  .rep-balance-strip { display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px; }
+  .rep-balance-strip .stat-card { flex:1;min-width:160px; }
+</style>
+
+<div class="card" style="margin-bottom:20px;">
+  <div class="card-header">
+    <span class="card-title">🧾 Caretaker Petty Cash Ledger</span>
+  </div>
+  <div class="card-body">
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">
+      Small cash purchases the Caretaker makes directly (bulbs, stationery, minor repairs) — these never touch the
+      bank, so they're logged here. "Reserve Money" (cash the association hands to the Caretaker) is pulled
+      automatically from the Bank Statement's "Reserve money to Caretaker" transactions.
+    </div>
+
+    <div id="rep-seed-current" style="display:none;font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">
+      Ledger starts from <strong id="rep-seed-current-text"></strong> —
+      <a href="#" onclick="repToggleSeedBox();return false;">change this</a>
+    </div>
+    <div id="rep-seed-box" style="display:none;background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px;" id="rep-seed-box-title">⚠️ Starting balance not set yet</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Tell it what the Caretaker's cash-in-hand was at the END of the month just before you start tracking here (e.g. "₹9,516 as of December 2023"). Double-check the Month field — it defaults to January, which is an easy one to miss changing.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="rep-seed-amount" type="number" step="0.01" placeholder="Opening balance (₹)" style="width:180px;padding:7px 10px;font-size:13px;">
+        <select id="rep-seed-month" style="padding:7px 10px;font-size:13px;"></select>
+        <select id="rep-seed-year" style="padding:7px 10px;font-size:13px;"></select>
+        <button class="btn btn-accent btn-sm" onclick="repSetSeed()">Set Starting Balance</button>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+      <select id="rep-year" onchange="repLoadMonth()"></select>
+      <select id="rep-month" onchange="repLoadMonth()">
+        <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+        <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+        <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+        <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+      </select>
+    </div>
+
+    <div class="rep-balance-strip" id="rep-balance-strip"></div>
+    <div id="rep-chain-breakdown"></div>
+
+    <div style="margin-bottom:20px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px;">💰 Reserve Money Received This Month</div>
+      <div id="rep-reserve-table"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+
+    <div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px;">🧾 Caretaker's Expenses</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;background:var(--bg-surface2);padding:12px;border-radius:var(--radius-sm);">
+        <div><label style="font-size:11px;color:var(--text-muted);display:block;">Date</label><input id="rep-exp-date" type="date" style="padding:7px 10px;font-size:13px;"></div>
+        <div><label style="font-size:11px;color:var(--text-muted);display:block;">Voucher #</label><input id="rep-exp-voucher" style="padding:7px 10px;font-size:13px;width:100px;"></div>
+        <div style="flex:1;min-width:220px;"><label style="font-size:11px;color:var(--text-muted);display:block;">Description</label><input id="rep-exp-desc" style="padding:7px 10px;font-size:13px;width:100%;" placeholder="e.g. 60W Bulb; 100W Bulb; Holder (30x2)"></div>
+        <div><label style="font-size:11px;color:var(--text-muted);display:block;">Amount (₹)</label><input id="rep-exp-amount" type="number" step="0.01" style="padding:7px 10px;font-size:13px;width:110px;"></div>
+        <button class="btn btn-accent" onclick="repAddExpense()">+ Add</button>
+      </div>
+      <div id="rep-expense-table"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+var repMonthReport = null;
+var repCurrentSeed = null;
+
+function caretakerPageInit() {
+  var now = new Date();
+  var ySel = document.getElementById('rep-year');
+  if (ySel && !ySel.options.length) {
+    var years = []; for (var y = now.getFullYear() + 1; y >= 2023; y--) years.push(y);
+    ySel.innerHTML = years.map(function(yy){ return '<option value="'+yy+'">'+yy+'</option>'; }).join('');
+    // Default to the Active Year (Settings), not today's real-world date —
+    // "today" could be far ahead of whatever year the association is
+    // actually focused on/testing with, which made the balance chain
+    // walk unnecessarily far on first load.
+    google.script.run.withSuccessHandler(function(r) {
+      var year = (r && r.success) ? r.data : now.getFullYear();
+      if (ySel) ySel.value = String(year);
+      document.getElementById('rep-month').value = String(now.getMonth()+1);
+      repCheckSeed();
+    }).withFailureHandler(function() {
+      ySel.value = String(now.getFullYear());
+      document.getElementById('rep-month').value = String(now.getMonth()+1);
+      repCheckSeed();
+    }).doPost_internal('settings.getActiveYear', {});
+  } else {
+    repCheckSeed();
+  }
+  var seedYSel = document.getElementById('rep-seed-year');
+  if (seedYSel && !seedYSel.options.length) {
+    var years2 = []; for (var y2 = now.getFullYear(); y2 >= 2022; y2--) years2.push(y2);
+    seedYSel.innerHTML = years2.map(function(yy){ return '<option value="'+yy+'">'+yy+'</option>'; }).join('');
+  }
+  var seedMSel = document.getElementById('rep-seed-month');
+  if (seedMSel && !seedMSel.options.length) {
+    var mn = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    seedMSel.innerHTML = mn.map(function(m,i){ return '<option value="'+(i+1)+'">'+m+'</option>'; }).join('');
+  }
+}
+
+function repCheckSeed() {
+  google.script.run.withSuccessHandler(function(r) {
+    var seed = (r && r.success) ? r.data : null;
+    repCurrentSeed = seed;
+    var box = document.getElementById('rep-seed-box');
+    var curLine = document.getElementById('rep-seed-current');
+    var curText = document.getElementById('rep-seed-current-text');
+    if (seed && seed.asOfMonth) {
+      if (box) box.style.display = 'none';
+      if (curLine) curLine.style.display = 'block';
+      if (curText) curText.textContent = formatRupees(seed.openingBalance) + ' as of ' + seed.asOfMonth;
+    } else {
+      if (box) box.style.display = 'block';
+      if (curLine) curLine.style.display = 'none';
+    }
+    repLoadMonth();
+  }).withFailureHandler(function(e) {
+    // Even if the seed lookup itself fails, the month view must still
+    // attempt to load (and show its own clear error if needed) — never
+    // leave the page silently stuck on its initial "Loading…" state.
+    repShowError('Could not check starting balance: ' + e);
+    repLoadMonth();
+  }).doPost_internal('caretaker.getSeed', {});
+}
+
+function repSetSeed() {
+  var amount = (document.getElementById('rep-seed-amount')||{}).value;
+  var month = (document.getElementById('rep-seed-month')||{}).value;
+  var year = (document.getElementById('rep-seed-year')||{}).value;
+  if (!amount || !month || !year) { showToast('Fill in all fields', 'error'); return; }
+  var monthKey = year + '-' + (Number(month) < 10 ? '0' + month : month);
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Starting balance updated', 'success'); repCheckSeed(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e){ showToast('Error: '+e, 'error'); })
+    .doPost_internal('caretaker.setSeed', { opening_balance: amount, as_of_month: monthKey });
+}
+
+// Opens the setup box even when a starting balance already exists, so a
+// mistake (like the month defaulting to January and being missed) can be
+// corrected directly instead of being stuck with a wrong value forever.
+function repToggleSeedBox() {
+  var box = document.getElementById('rep-seed-box');
+  var curLine = document.getElementById('rep-seed-current');
+  var title = document.getElementById('rep-seed-box-title');
+  if (!box) return;
+  if (repCurrentSeed && repCurrentSeed.asOfMonth) {
+    if (title) title.textContent = '✏️ Change starting balance';
+    var parts = repCurrentSeed.asOfMonth.split('-');
+    var amtEl = document.getElementById('rep-seed-amount');
+    var mEl = document.getElementById('rep-seed-month');
+    var yEl = document.getElementById('rep-seed-year');
+    if (amtEl) amtEl.value = repCurrentSeed.openingBalance;
+    if (mEl) mEl.value = String(Number(parts[1]));
+    if (yEl) yEl.value = parts[0];
+  }
+  box.style.display = 'block';
+  if (curLine) curLine.style.display = 'none';
+}
+
+function repLoadMonth() {
+  var year = Number((document.getElementById('rep-year')||{}).value);
+  var month = Number((document.getElementById('rep-month')||{}).value);
+  if (!year || !month) return;
+  document.getElementById('rep-balance-strip').innerHTML = loadingHtml('Calculating…');
+  document.getElementById('rep-reserve-table').innerHTML = loadingHtml('Calculating…');
+  document.getElementById('rep-expense-table').innerHTML = loadingHtml('Calculating…');
+
+  // Safety net: if the server call hasn't answered within 25s, tell the
+  // user plainly rather than leaving three spinners running forever with
+  // no feedback at all — whatever the underlying cause turns out to be.
+  var answered = false;
+  var timeoutId = setTimeout(function() {
+    if (!answered) repShowError('This is taking far longer than expected (25s+) and may have failed silently. Please check the Apps Script execution log (Extensions → Apps Script → Executions) for the real error, or try a different month.');
+  }, 25000);
+
+  google.script.run.withSuccessHandler(function(r) {
+    answered = true; clearTimeout(timeoutId);
+    if (!r || !r.success) { repShowError((r && r.error) || 'Failed to load'); return; }
+    repMonthReport = r.data;
+    repRenderBalanceStrip();
+    repRenderReserveTable();
+    repRenderExpenseTable();
+  }).withFailureHandler(function(e) {
+    answered = true; clearTimeout(timeoutId);
+    repShowError(e);
+  }).doPost_internal('caretaker.getMonthReport', { year: year, month: month });
+}
+
+function repShowError(msg) {
+  var errHtml = '<div style="color:var(--c-rejected-fg);padding:8px;font-size:12px;">Error: ' + msg + '</div>';
+  document.getElementById('rep-balance-strip').innerHTML = errHtml;
+  document.getElementById('rep-reserve-table').innerHTML = errHtml;
+  document.getElementById('rep-expense-table').innerHTML = errHtml;
+}
+
+function repRenderBalanceStrip() {
+  var el = document.getElementById('rep-balance-strip');
+  if (!el) return;
+  var d = repMonthReport;
+  if (!d) { el.innerHTML = ''; return; }
+  var mn = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
+  var prevM = d.month - 1, prevY = d.year;
+  if (prevM < 1) { prevM = 12; prevY = d.year - 1; }
+  var prevLabel = 'Closing balance for ' + mn[prevM] + (prevM === 12 ? ', ' + prevY : '');
+  var seedNote = d.seedUsed ? ('Chained from starting balance ' + formatRupees(d.seedUsed.openingBalance) + ' as of ' + d.seedUsed.asOfMonth) : '';
+  var availableTotal = d.opening + d.reserveTotal;
+  el.innerHTML =
+    '<div class="stat-card info" title="' + seedNote + '"><div class="stat-label">Opening Balance</div><div class="stat-value" style="font-size:18px">' + formatRupees(d.opening) + '</div><div class="stat-sub" style="font-size:10.5px;">' + prevLabel + '</div></div>' +
+    '<div class="stat-card green"><div class="stat-label">Reserve Money</div><div class="stat-value" style="font-size:18px">' + formatRupees(availableTotal) + '</div><div class="stat-sub" style="font-size:10.5px;">Opening ' + formatRupees(d.opening) + ' + Received ' + formatRupees(d.reserveTotal) + '</div></div>' +
+    '<div class="stat-card red"><div class="stat-label">Expenses</div><div class="stat-value" style="font-size:18px">' + formatRupees(d.expenseTotal) + '</div></div>' +
+    '<div class="stat-card gold"><div class="stat-label">Closing Balance</div><div class="stat-value" style="font-size:18px">' + formatRupees(d.closing) + '</div></div>';
+  repRenderChainBreakdown(d);
+}
+
+// Full audit trail: every month the opening-balance calculation walked
+// through to get here, with exactly how many entries and how much it
+// counted for each one. Makes any discrepancy directly visible instead
+// of having to trust an opaque final number.
+function repRenderChainBreakdown(d) {
+  var box = document.getElementById('rep-chain-breakdown');
+  if (!box) return;
+  if (!d.seedUsed || !d.seedUsed.asOfMonth) { box.innerHTML = ''; return; }
+  var h = '<details style="margin-top:2px;margin-bottom:14px;">' +
+    '<summary style="cursor:pointer;font-size:11.5px;color:var(--text-muted);">🔍 How this opening balance was calculated</summary>' +
+    '<div style="font-size:12px;margin-top:8px;padding:10px 14px;background:var(--bg-surface2);border-radius:var(--radius-sm);">' +
+    'Starting balance: <strong>' + formatRupees(d.seedUsed.openingBalance) + '</strong> as of <strong>' + d.seedUsed.asOfMonth + '</strong>';
+  if (!d.chainSteps.length) {
+    h += '<div style="margin-top:6px;color:var(--text-muted);">No months in between — this is the very next month after the starting balance.</div>';
+  } else {
+    h += '<table class="rep-table" style="margin-top:8px;"><thead><tr><th>Month</th><th style="text-align:right">Reserve Money</th><th style="text-align:right">Expenses</th><th style="text-align:right">Running Balance</th></tr></thead><tbody>';
+    d.chainSteps.forEach(function(s) {
+      var mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      h += '<tr><td>' + mn[s.month] + ' ' + s.year + '</td>' +
+        '<td style="text-align:right">' + formatRupees(s.reserveTotal) + ' <span style="color:var(--text-muted);">(' + s.reserveCount + ')</span></td>' +
+        '<td style="text-align:right">' + formatRupees(s.expenseTotal) + ' <span style="color:var(--text-muted);">(' + s.expenseCount + ' entries)</span></td>' +
+        '<td style="text-align:right;font-weight:700;">' + formatRupees(s.runningOpening) + '</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+  h += '<div style="margin-top:8px;color:var(--text-muted);">→ Opening balance for the month shown above: <strong>' + formatRupees(d.opening) + '</strong></div>';
+  h += '</div></details>';
+  box.innerHTML = h;
+}
+
+function repRenderReserveTable() {
+  var el = document.getElementById('rep-reserve-table');
+  if (!el) return;
+  var rows = (repMonthReport && repMonthReport.reserveMoney) ? repMonthReport.reserveMoney : [];
+  if (!rows.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px;">None received this month.</div>'; return; }
+  var h = '<table class="rep-table"><thead><tr><th style="width:36px;">#</th><th>Date</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead><tbody>';
+  rows.forEach(function(r, idx) {
+    h += '<tr><td style="color:var(--text-muted);">' + (idx + 1) + '</td><td>' + formatDate(r.date) + '</td><td>' + repE(r.description) + '</td><td style="text-align:right">' + formatRupees(r.amount) + '</td></tr>';
+  });
+  el.innerHTML = h + '</tbody></table>' +
+    '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">' + rows.length + ' entr' + (rows.length === 1 ? 'y' : 'ies') + '</div>';
+}
+
+function repRenderExpenseTable() {
+  var el = document.getElementById('rep-expense-table');
+  if (!el) return;
+  var rows = (repMonthReport && repMonthReport.expenses) ? repMonthReport.expenses : [];
+  if (!rows.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px;">No expenses logged for this month yet.</div>'; return; }
+  var h = '<table class="rep-table"><thead><tr><th style="width:36px;">#</th><th>Date</th><th>Voucher #</th><th>Description</th><th style="text-align:right">Amount</th><th style="width:80px;"></th></tr></thead><tbody>';
+  rows.forEach(function(r, idx) {
+    h += '<tr id="rep-exp-row-' + r.expense_id + '"><td style="color:var(--text-muted);">' + (idx + 1) + '</td><td>' + formatDate(r.date) + '</td><td>' + repE(r.voucher_no) + '</td><td>' + repE(r.description) + '</td>' +
+      '<td style="text-align:right">' + formatRupees(r.amount) + '</td>' +
+      '<td style="white-space:nowrap;">' +
+        '<span class="edit-pencil" style="opacity:0;cursor:pointer;margin-right:8px;" title="Edit" onclick="repOpenEditExpense(\'' + r.expense_id + '\')">✏️</span>' +
+        '<span class="edit-pencil" style="opacity:0;cursor:pointer;margin-right:8px;" title="Copy as new entry" onclick="repCopyExpense(\'' + r.expense_id + '\')">📋</span>' +
+        '<span class="edit-pencil" style="opacity:0;cursor:pointer;" title="Delete" onclick="repDeleteExpense(\'' + r.expense_id + '\')">🗑️</span>' +
+      '</td></tr>';
+  });
+  el.innerHTML = h + '</tbody></table>' +
+    '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">' + rows.length + ' entr' + (rows.length === 1 ? 'y' : 'ies') + '</div>';
+}
+
+// Recomputes the balance-strip totals from whatever's currently in
+// repMonthReport.expenses — used after a local (optimistic) change, so
+// add/edit/delete feel instant instead of waiting on a full reload that
+// re-walks the whole balance chain from the ledger's starting month.
+function repRecalcLocalTotals() {
+  var d = repMonthReport;
+  if (!d) return;
+  d.expenseTotal = d.expenses.reduce(function(s, e) { return s + e.amount; }, 0);
+  d.closing = d.opening + d.reserveTotal - d.expenseTotal;
+}
+
+function repAddExpense() {
+  var payload = {
+    date: (document.getElementById('rep-exp-date')||{}).value || '',
+    voucher_no: (document.getElementById('rep-exp-voucher')||{}).value || '',
+    description: (document.getElementById('rep-exp-desc')||{}).value || '',
+    amount: (document.getElementById('rep-exp-amount')||{}).value || '',
+    recorded_by: 'Manager'
+  };
+  if (!payload.date || !payload.description || !payload.amount) { showToast('Fill date, description, and amount', 'error'); return; }
+  doPostWithHistoryConfirm('caretaker.addExpense', payload,
+    function(r) {
+      if (r && r.success) {
+        showToast('Expense logged', 'success');
+        // Optimistic: add it straight into the local list rather than
+        // re-fetching (which re-walks the whole balance chain) — instant
+        // feedback instead of a wait.
+        if (repMonthReport && r.data && r.data.expense_id) {
+          repMonthReport.expenses.push({
+            expense_id: r.data.expense_id, date: payload.date, voucher_no: payload.voucher_no,
+            description: payload.description.trim(), amount: Number(payload.amount)
+          });
+          repRecalcLocalTotals();
+          repRenderBalanceStrip();
+          repRenderExpenseTable();
+        }
+        document.getElementById('rep-exp-voucher').value = '';
+        document.getElementById('rep-exp-desc').value = '';
+        document.getElementById('rep-exp-amount').value = '';
+      } else showToast((r && r.error) || 'Failed', 'error');
+    },
+    function(e){ showToast('Error: '+e, 'error'); }
+  );
+}
+
+// Pre-fills the add-form with an existing row's values, so a very similar
+// entry (e.g. the same recurring purchase) can be logged with just one or
+// two fields changed instead of retyping everything.
+function repCopyExpense(id) {
+  var r = repFindExpense(id);
+  if (!r) return;
+  document.getElementById('rep-exp-date').value = r.date;
+  document.getElementById('rep-exp-voucher').value = r.voucher_no;
+  document.getElementById('rep-exp-desc').value = r.description;
+  document.getElementById('rep-exp-amount').value = r.amount;
+  document.getElementById('rep-exp-desc').focus();
+  showToast('Copied — adjust and click + Add', '');
+}
+
+function repFindExpense(id) {
+  var rows = (repMonthReport && repMonthReport.expenses) ? repMonthReport.expenses : [];
+  for (var i = 0; i < rows.length; i++) if (rows[i].expense_id === id) return rows[i];
+  return null;
+}
+
+function repOpenEditExpense(id) {
+  var r = repFindExpense(id);
+  if (!r) return;
+  openModal(
+    '<div class="modal-header"><span class="modal-title">✏️ Edit Caretaker Expense</span>' +
+      '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
+    '<div class="modal-body">' +
+      '<div class="form-group"><label>Date</label><input id="rep-edit-date" type="date" value="' + r.date + '"></div>' +
+      '<div class="form-group"><label>Voucher #</label><input id="rep-edit-voucher" value="' + repE(r.voucher_no) + '"></div>' +
+      '<div class="form-group"><label>Description</label><input id="rep-edit-desc" value="' + repE(r.description) + '"></div>' +
+      '<div class="form-group"><label>Amount (₹)</label><input id="rep-edit-amount" type="number" step="0.01" value="' + r.amount + '"></div>' +
+      '<div class="form-actions">' +
+        '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
+        '<button class="btn btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg)" onclick="repDeleteExpense(\'' + id + '\')">🗑 Delete</button>' +
+        '<button class="btn btn-accent" onclick="repSaveEditExpense(\'' + id + '\')">💾 Save</button>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function repSaveEditExpense(id) {
+  var payload = {
+    expense_id: id,
+    date: (document.getElementById('rep-edit-date')||{}).value || '',
+    voucher_no: (document.getElementById('rep-edit-voucher')||{}).value || '',
+    description: (document.getElementById('rep-edit-desc')||{}).value || '',
+    amount: (document.getElementById('rep-edit-amount')||{}).value || ''
+  };
+  if (!payload.date || !payload.description || !payload.amount) { showToast('Fill all fields', 'error'); return; }
+  doPostWithHistoryConfirm('caretaker.updateExpense', payload,
+    function(r) {
+      if (r && r.success) {
+        showToast('Saved', 'success');
+        closeModalForce();
+        var row = repFindExpense(id);
+        if (row) {
+          row.date = payload.date; row.voucher_no = payload.voucher_no;
+          row.description = payload.description.trim(); row.amount = Number(payload.amount);
+          repRecalcLocalTotals();
+          repRenderBalanceStrip();
+          repRenderExpenseTable();
+        }
+      } else showToast((r && r.error) || 'Failed', 'error');
+    },
+    function(e){ showToast('Error: '+e, 'error'); }
+  );
+}
+
+function repDeleteExpense(id) {
+  if (!confirm('Delete this expense entry?')) return;
+  doPostWithHistoryConfirm('caretaker.deleteExpense', { expense_id: id },
+    function(r) {
+      if (r && r.success) {
+        showToast('Deleted', 'success');
+        closeModalForce();
+        if (repMonthReport) {
+          repMonthReport.expenses = repMonthReport.expenses.filter(function(e) { return e.expense_id !== id; });
+          repRecalcLocalTotals();
+          repRenderBalanceStrip();
+          repRenderExpenseTable();
+        }
+      } else showToast((r && r.error) || 'Failed', 'error');
+    },
+    function(e){ showToast('Error: '+e, 'error'); }
+  );
+}
+
+function repE(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>

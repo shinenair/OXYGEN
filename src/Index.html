@@ -46,6 +46,9 @@
       <li><a href="#" class="nav-link" onclick="return navigateTo('bank',this)">
         <span class="nav-icon">🏦</span><span>Bank Statement</span>
       </a></li>
+      <li><a href="#" class="nav-link" onclick="return navigateTo('caretaker',this)">
+        <span class="nav-icon">🧾</span><span>Caretaker Ledger</span>
+      </a></li>
       <li><a href="#" class="nav-link" onclick="return navigateTo('lpg',this)">
         <span class="nav-icon">🔥</span><span>LPG Readings</span>
       </a></li>
@@ -117,6 +120,9 @@
     <div id="page-bank" class="page-section" style="display:none;">
       <?!= include('BankStatement') ?>
     </div>
+    <div id="page-caretaker" class="page-section" style="display:none;">
+      <?!= include('Caretaker') ?>
+    </div>
     <div id="page-lpg" class="page-section" style="display:none;">
       <?!= include('LPGReadings') ?>
     </div>
@@ -182,6 +188,7 @@
       units:     'Units',
       payments:  'Fees Received by the Association',
       bank:      'Bank Statement',
+      caretaker: 'Caretaker Ledger',
       lpg:       'LPG Meter Readings',
       lpginv:    'LPG Inventory & Business P&L',
       reports:   'Reports',
@@ -206,7 +213,8 @@
       bank:      function() { if (typeof bankPageInit   === 'function') bankPageInit(); },
       lpg:       function() { if (typeof lpgPageInit    === 'function') lpgPageInit(); },
       lpginv:    function() { if (typeof invPageInit    === 'function') invPageInit(); },
-      reports:   function() { if (typeof repPageInit    === 'function') repPageInit(); },
+      reports:   function() { if (typeof rpPageInit    === 'function') rpPageInit(); },
+      caretaker: function() { if (typeof caretakerPageInit === 'function') caretakerPageInit(); },
       movein:    function() { if (typeof moveinPageInit    === 'function') moveinPageInit(); },
       partyhall: function() { if (typeof partyhallPageInit === 'function') partyhallPageInit(); },
       vehicle:   function() { if (typeof vehiclePageInit   === 'function') vehiclePageInit(); },
