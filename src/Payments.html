@@ -377,6 +377,12 @@ function feesRender() {
           if (!name) return '';
           return '<div style="font-size:10.5px;color:var(--text-muted);max-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + feeE(name) + '">' + feeE(name) + '</div>';
         })() +
+        (feesType === 'LPG'
+          ? '<div style="margin-top:3px;display:flex;gap:4px;">' +
+              '<button class="btn btn-xs btn-outline" style="font-size:9.5px;padding:1px 5px;" title="Shift ALL this unit\'s LPG payments back one month (e.g. Jan 2024 → Dec 2023)" onclick="event.stopPropagation();feesShiftLpgMonth(\'' + feeE(u.unit_id) + '\',-1)">⏪ −1 mo</button>' +
+              '<button class="btn btn-xs btn-outline" style="font-size:9.5px;padding:1px 5px;" title="Undo: shift ALL this unit\'s LPG payments forward one month" onclick="event.stopPropagation();feesShiftLpgMonth(\'' + feeE(u.unit_id) + '\',1)">⏩ +1 mo</button>' +
+            '</div>'
+          : '') +
       '</td>' +
       cells +
       '<td style="text-align:right;font-weight:800;white-space:nowrap">' + (rowTotal ? '₹' + Math.round(rowTotal).toLocaleString('en-IN') : '—') +
@@ -690,6 +696,38 @@ function feesSaveEdit(paymentId) {
       unit_id:      gv('pe-unit'),
       reviewed_by:  'Manager'
     });
+}
+
+// One-click bulk fix for the LPG timing offset: shift ALL of a unit's LPG
+// payments by ±1 month at once, instead of editing every cell. Only real
+// payments move (UO markers stay put); amounts and bank dates are unchanged.
+function feesShiftLpgMonth(unitId, offset) {
+  var unit = String(unitId).toUpperCase();
+  var affected = 0;
+  for (var i = 0; i < paysAll.length; i++) {
+    var p = paysAll[i];
+    if (String(p.unit_id).toUpperCase() !== unit) continue;
+    if (p.payment_type !== 'LPG') continue;
+    if (p.status !== 'Verified' && p.status !== 'Pending') continue;
+    affected++;
+  }
+  if (!affected) { showToast('No LPG payments to shift for ' + unit, 'info'); return; }
+  var dir = offset < 0 ? 'BACK one month' : 'FORWARD one month';
+  var eg  = offset < 0 ? 'e.g. Jan 2024 → Dec 2023' : 'e.g. Dec 2023 → Jan 2024';
+  var ok = confirm('Shift ALL ' + affected + ' LPG payment(s) for ' + unit + ' ' + dir + '?\n\n' +
+    eg + '\n\nThis only changes which month each payment is recorded FOR. ' +
+    'Amounts and bank payment dates are untouched. UO markers stay put.\n\n' +
+    (offset > 0 ? '' : 'You can undo with the ⏩ +1 mo button.\n\n') + 'Continue?');
+  if (!ok) return;
+  doPostWithHistoryConfirm('payments.shiftMonths',
+    { unit_id: unit, payment_type: 'LPG', offset: offset },
+    function(r) {
+      if (r && r.success) {
+        showToast('Shifted ' + (r.data ? r.data.changed : affected) + ' LPG payment(s) for ' + unit, 'success');
+        loadPayments();
+      } else showToast((r && r.error) || 'Shift failed', 'error');
+    },
+    function(e) { showToast('Error: ' + e, 'error'); });
 }
 
 function feeE(s) {

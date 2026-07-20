@@ -151,6 +151,40 @@ var PaymentsService = (function() {
     return { success: true, deleted: deleted };
   }
 
+  // Shift every real payment (Verified/Pending) for one unit + type by a
+  // whole number of months — the one-click fix for the LPG timing offset,
+  // where a unit's payments were all recorded one month late. UO markers and
+  // Rejected rows are left in place (they're tied to the actual month, not a
+  // payment). Amounts, bank references and dates are untouched — only the
+  // month a payment is recorded FOR moves. Returns a from→to echo per row.
+  function shiftUnitMonths(unitId, paymentType, offset) {
+    var unit = String(unitId || '').toUpperCase();
+    var off  = Number(offset) || 0;
+    if (!unit || !paymentType) throw new Error('Unit and payment type are required.');
+    if (!off) return { success: true, changed: 0, details: [] };
+    var sheet = Database.getSheet(SHEET);
+    var rows  = Database.getAll(SHEET);
+    var changed = 0, details = [];
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][C.UNIT_ID]).toUpperCase() !== unit) continue;
+      if (String(rows[i][C.PAYMENT_TYPE]) !== paymentType) continue;
+      var st = String(rows[i][C.STATUS]);
+      if (st !== 'Verified' && st !== 'Pending') continue; // leave UO / Rejected
+      var mk = _normMonth(rows[i][C.MONTH]);
+      if (!mk) continue;
+      var parts = mk.split('-');
+      var y = Number(parts[0]), mo = Number(parts[1]) + off;
+      while (mo < 1)  { mo += 12; y--; }
+      while (mo > 12) { mo -= 12; y++; }
+      var nk = _mk(y, mo);
+      sheet.getRange(i + 2, C.MONTH + 1).setValue("'" + nk);
+      changed++;
+      details.push({ from: mk, to: nk, amount: Number(rows[i][C.AMOUNT]) || 0 });
+    }
+    if (changed) SpreadsheetApp.flush();
+    return { success: true, changed: changed, details: details };
+  }
+
   function getAllPayments(filters) {
     var rows = Database.getAll(SHEET);
     var payments = rows.map(function(r) { return _toObj(r); });
@@ -441,6 +475,7 @@ var PaymentsService = (function() {
     deleteRecord:               deleteRecord,
     getMonthSummary:            getMonthSummary,
     deleteByMonth:              deleteByMonth,
+    shiftUnitMonths:            shiftUnitMonths,
     allocateFromBankBatch:      allocateFromBankBatch
   };
 })();
