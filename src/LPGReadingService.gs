@@ -252,10 +252,20 @@ var LPGReadingService = (function() {
     var todayKey = today.getFullYear() * 100 + (today.getMonth() + 1);
 
     out.forEach(function(r) {
+      // New convention: an LPG payment is stamped with the CONSUMPTION month
+      // it pays for — so a reading for month M pairs with a payment whose
+      // "For Month" is M itself. Legacy records (posted before this change)
+      // are still stamped with the following month (M+1), so we accept EITHER
+      // and prefer the exact-month match. This means no risky bulk re-label:
+      // old data keeps working, new/corrected data lines up cleanly.
+      var sameKey = r.year + '-' + (r.month < 10 ? '0' + r.month : r.month);
       var nextY = r.month === 12 ? r.year + 1 : r.year;
       var nextM = r.month === 12 ? 1 : r.month + 1;
       var nextKey = nextY + '-' + (nextM < 10 ? '0' + nextM : nextM);
-      var pay = payMap[nextKey];
+      var pay = payMap[sameKey] || payMap[nextKey];
+      // The actual month recorded against the payment on the Fees Received
+      // page — surfaced verbatim so the history shows the treasurer's truth.
+      r.payment_for_month = payMap[sameKey] ? sameKey : (payMap[nextKey] ? nextKey : '');
 
       if (pay) {
         var amt = Number(pay.amount);

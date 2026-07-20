@@ -292,6 +292,7 @@ var ApiRouter = (function() {
       case 'payments.getByUnit':      return PaymentsService.getPaymentsByUnit(data.unit_id, data.limit || null);
       case 'payments.getMonthlyHistory': return PaymentsService.getMonthlyPaymentHistory(data.unit_id);
       case 'payments.getStats':       return PaymentsService.getPaymentStats();
+      case 'payments.bankDate':       return _resolveBankDate(data.txn_id);
 
       // Export
       case 'export.units':         return ExportService.exportUnitsReport();
@@ -544,6 +545,26 @@ var ApiRouter = (function() {
   // per-source counts, and a delete that clears ONE month across Fees
   // Received + BOTH bank accounts at once. Replaces the old single-shot
   // "Reset ALL Payment Data" with controlled, month-by-month cleanup.
+  // The real-world date of a bank-posted payment: look the txn id up in both
+  // bank accounts. Used by the Fees Received edit window to show the fixed
+  // "Payment Date (from bank)" beside the editable "Payment For Month".
+  function _resolveBankDate(txnId) {
+    var tid = String(txnId || '').trim();
+    if (!tid) return { date: '' };
+    var found = '';
+    function scan(svc) {
+      if (found) return;
+      try {
+        svc.getAllTransactions(null).forEach(function(t) {
+          if (!found && String(t.txn_id) === tid) found = t.date;
+        });
+      } catch (e) {}
+    }
+    scan(BankService);
+    if (!found) scan(Bank2Service);
+    return { date: found ? String(found) : '' };
+  }
+
   function _financialMonthSummary() {
     var map = {};
     function add(list, key) {

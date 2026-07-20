@@ -584,6 +584,30 @@ function feesDeleteRecord(paymentId) {
     function(e) { showToast('Error: ' + e, 'error'); });
 }
 
+// Options for the "Payment For Month" dropdown, labelled "Jan 2024".
+// Ranges from Jan 2023 to next December, newest first, with the payment's
+// stored month pre-selected (and force-included even if outside the range).
+function _feeMonthOptions(selectedKey) {
+  var mns = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var sel = String(selectedKey || '');
+  var now = new Date();
+  var startY = 2023, endY = now.getFullYear() + 1;
+  var opts = [], seen = {};
+  for (var y = endY; y >= startY; y--) {
+    for (var m = 12; m >= 1; m--) {
+      var key = y + '-' + (m < 10 ? '0' + m : String(m));
+      seen[key] = true;
+      opts.push('<option value="' + key + '"' + (key === sel ? ' selected' : '') + '>' + mns[m] + ' ' + y + '</option>');
+    }
+  }
+  if (sel && !seen[sel]) {
+    var mm = sel.match(/^(\d{4})-(\d{1,2})/);
+    var lbl = mm ? (mns[Number(mm[2])] || '') + ' ' + mm[1] : sel;
+    opts.unshift('<option value="' + feeE(sel) + '" selected>' + feeE(lbl) + '</option>');
+  }
+  return opts.join('');
+}
+
 function feesEditPayment(paymentId) {
   var p = null;
   for (var i = 0; i < paysAll.length; i++) {
@@ -603,16 +627,28 @@ function feesEditPayment(paymentId) {
     stOpts += '<option' + (statuses[i] === p.status ? ' selected' : '') + '>' + statuses[i] + '</option>';
   }
 
+  // The real-world Payment Date. For a bank-posted record it is the bank
+  // transaction's own date — the single source of truth — fetched below and
+  // shown read-only. For a manual record it falls back to when it was recorded.
+  var bankTxn = String(p.notes || '').match(/BANK:(\S+?)(?:[\s(]|$)/);
+  var fallbackDate = (p.submitted_at || '').slice(0, 10);
+  var dateLine = bankTxn
+    ? '🏦 <span id="pe-bankdate">loading…</span> <span style="color:var(--text-muted);">(from bank statement — the truth)</span>'
+    : '✍️ ' + (fallbackDate || '—') + ' <span style="color:var(--text-muted);">(recorded date — manual entry)</span>';
+
   openModal(
     '<div class="modal-header"><span class="modal-title">✏️ Edit Payment — ' + feeE(p.unit_id) + '</span>' +
     '<button class="modal-close" onclick="closeModalForce()">✕</button></div>' +
     '<div class="modal-body">' +
-      (String(p.notes||'').indexOf('BANK:') === 0
-        ? '<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:12px;margin-bottom:14px;">🏦 Posted automatically from a bank statement transaction. Correct the type, month or amount below if the automatic allocation was wrong.</div>'
+      (bankTxn
+        ? '<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:12px;margin-bottom:14px;">🏦 Posted automatically from a bank statement transaction. The <strong>Payment Date</strong> is fixed by the bank; use <strong>Payment For Month</strong> to set which month it settles.</div>'
         : '') +
+      '<div class="form-group"><label>Payment Date</label>' +
+        '<div style="font-size:13px;padding:8px 10px;background:var(--bg-surface2);border:1px solid var(--border);border-radius:var(--radius-sm);">' + dateLine + '</div>' +
+      '</div>' +
       '<div class="form-row">' +
         '<div class="form-group"><label>Payment Type</label><select id="pe-type">' + typeOpts + '</select></div>' +
-        '<div class="form-group"><label>For Month</label><input id="pe-month" type="month" value="' + feeE(p.month || '') + '"></div>' +
+        '<div class="form-group"><label>Payment For Month</label><select id="pe-month">' + _feeMonthOptions(p.month) + '</select></div>' +
       '</div>' +
       '<div class="form-row">' +
         '<div class="form-group"><label>Amount (₹)</label><input id="pe-amount" type="number" value="' + feeE(p.amount || '') + '"></div>' +
@@ -625,6 +661,16 @@ function feesEditPayment(paymentId) {
       '</div>' +
     '</div>'
   );
+
+  if (bankTxn) {
+    google.script.run.withSuccessHandler(function(r) {
+      var el = document.getElementById('pe-bankdate');
+      if (el) el.textContent = (r && r.date) ? formatDate(r.date) : (fallbackDate || '—');
+    }).withFailureHandler(function() {
+      var el = document.getElementById('pe-bankdate');
+      if (el) el.textContent = fallbackDate || '—';
+    }).doPost_internal('payments.bankDate', { txn_id: bankTxn[1] });
+  }
 }
 
 function feesSaveEdit(paymentId) {

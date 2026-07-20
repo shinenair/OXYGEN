@@ -760,6 +760,14 @@ function upLoadLpgHistory(unitId) {
   }).doPost_internal('lpg.getUnitHistory', { unit_id: unitId });
 }
 
+// 'YYYY-MM' -> 'Mon YYYY' (e.g. '2024-12' -> 'Dec 2024'). The month a
+// payment is recorded FOR on the Fees Received page.
+function _upForMonthLabel(key) {
+  var mns = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var m = String(key || '').match(/^(\d{4})-(\d{1,2})/);
+  return m ? (mns[Number(m[2])] || '') + ' ' + m[1] : String(key || '');
+}
+
 function upRenderLpgHistory() {
   var el = document.getElementById('up-lpg-history');
   if (!el || !upLpgHistoryData) return;
@@ -775,7 +783,7 @@ function upRenderLpgHistory() {
   var h = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
     '<label style="font-size:11px;color:var(--text-muted);">Year</label>' +
     '<select onchange="upLpgHistoryYear=Number(this.value);upRenderLpgHistory();" style="padding:4px 8px;font-size:12px;">' + yearOpts + '</select>' +
-    '<span style="font-size:10.5px;color:var(--text-muted);margin-left:6px;">"Paid" is looked up from next month\'s actual LPG payment — e.g. December\'s row shows what was paid in January.</span>' +
+    '<span style="font-size:10.5px;color:var(--text-muted);margin-left:6px;">"Paid" is the actual LPG payment recorded for that month on Fees Received — the gas is used one month, the money lands the next, but it is booked FOR the reading month. "Payment Date" is the real bank date; "Payment For The Month" is the month it settles.</span>' +
   '</div>';
 
   h += '<div class="table-wrap" style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;"><table class="up-resp-table" style="border-collapse:collapse;width:100%;font-size:12px;">' +
@@ -784,6 +792,7 @@ function upRenderLpgHistory() {
     '<th style="text-align:right;padding:6px 8px;">Curr</th><th style="text-align:right;padding:6px 8px;">Consumed</th>' +
     '<th style="text-align:right;padding:6px 8px;">Calculated</th><th style="text-align:right;padding:6px 8px;">Paid</th>' +
     '<th style="padding:6px 8px;">Payment Date</th>' +
+    '<th style="padding:6px 8px;">Payment For The Month</th>' +
     '<th style="padding:6px 8px;">Status</th><th style="padding:6px 8px;"></th></tr></thead><tbody>';
 
   var sumCalc = 0, sumPaid = 0;
@@ -804,6 +813,7 @@ function upRenderLpgHistory() {
       '<td data-label="Calculated" style="text-align:right;padding:6px 8px;font-weight:700">' + (isFinite(d.amount) ? '₹' + Math.round(d.amount).toLocaleString('en-IN') : '—') + '</td>' +
       '<td data-label="Paid" style="text-align:right;padding:6px 8px;">' + (d.live_paid_amount != null && isFinite(d.live_paid_amount) ? '₹' + Math.round(d.live_paid_amount).toLocaleString('en-IN') : '—') + '</td>' +
       '<td data-label="Payment Date" style="padding:6px 8px;color:var(--text-muted);">' + (d.live_payment_date ? formatDate(d.live_payment_date) : '—') + '</td>' +
+      '<td data-label="Payment For The Month" style="padding:6px 8px;color:var(--text-muted);">' + (d.payment_for_month ? _upForMonthLabel(d.payment_for_month) : '—') + '</td>' +
       '<td data-label="Status" style="padding:6px 8px;">' + statusHtml + (d.flagged ? ' <span title="Flagged' + (d.flag_note ? ': ' + _e(d.flag_note) : '') + '" style="cursor:help;">🚩</span>' : '') + '</td>' +
       '<td data-label="" style="padding:6px 8px;white-space:nowrap;">' +
         (APP_ROLE === 'admin' ? '<button class="btn btn-xs btn-outline" onclick="upOpenLpgFlag(\'' + d.reading_id + '\')" title="Admin: flag this month\'s comparison as incorrect">' + (d.flagged ? '✏️' : '🚩') + '</button>' : '') +
@@ -815,7 +825,7 @@ function upRenderLpgHistory() {
     '<td data-label="" colspan="4" style="padding:7px 8px;">TOTAL — ' + upLpgHistoryYear + '</td>' +
     '<td data-label="Calculated" style="text-align:right;padding:7px 8px;">₹' + Math.round(sumCalc).toLocaleString('en-IN') + '</td>' +
     '<td data-label="Paid" style="text-align:right;padding:7px 8px;">₹' + Math.round(sumPaid).toLocaleString('en-IN') + '</td>' +
-    '<td data-label=""></td>' +
+    '<td data-label="" colspan="2"></td>' +
     '<td data-label="" colspan="2" style="padding:7px 8px;' + (mismatchTotal ? 'color:#f59e0b;' : 'color:var(--c-verified-fg);') + '">' +
       (mismatchTotal ? '⚠️ Totals differ by ₹' + Math.round(Math.abs(sumPaid - sumCalc)).toLocaleString('en-IN') : '✓ Totals match') +
     '</td></tr></tfoot></table></div>';

@@ -298,6 +298,12 @@ var PaymentsService = (function() {
       var ym = _monthFromDateStr(txn.dateStr);
       if (!ym) { skipped++; continue; }  // date unreadable: do NOT post to a guessed month
       var y  = ym.y, mo = ym.m;
+      // LPG convention: a payment lands the month AFTER the gas it pays for
+      // (December's reading is settled in January). Book it to the CONSUMPTION
+      // (previous) month so "Payment For Month" lines up with that month's
+      // reading — the bank date stays the real-world truth, this is only the
+      // month it is FOR. The treasurer can still override it in the edit window.
+      if (type === 'LPG') { mo--; if (mo < 1) { mo = 12; y--; } }
       var unit = String(txn.unit_id).toUpperCase();
       var months = [];
 
