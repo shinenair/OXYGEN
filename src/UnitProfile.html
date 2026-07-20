@@ -801,8 +801,8 @@ function upRenderLpgHistory() {
       '<td data-label="Prev" style="text-align:right;padding:6px 8px;">' + d.previous_reading + '</td>' +
       '<td data-label="Curr" style="text-align:right;padding:6px 8px;">' + d.current_reading + '</td>' +
       '<td data-label="Consumed" style="text-align:right;padding:6px 8px;">' + d.consumed + '</td>' +
-      '<td data-label="Calculated" style="text-align:right;padding:6px 8px;font-weight:700">₹' + Math.round(d.amount).toLocaleString('en-IN') + '</td>' +
-      '<td data-label="Paid" style="text-align:right;padding:6px 8px;">' + (d.live_paid_amount !== null ? '₹' + Math.round(d.live_paid_amount).toLocaleString('en-IN') : '—') + '</td>' +
+      '<td data-label="Calculated" style="text-align:right;padding:6px 8px;font-weight:700">' + (isFinite(d.amount) ? '₹' + Math.round(d.amount).toLocaleString('en-IN') : '—') + '</td>' +
+      '<td data-label="Paid" style="text-align:right;padding:6px 8px;">' + (d.live_paid_amount != null && isFinite(d.live_paid_amount) ? '₹' + Math.round(d.live_paid_amount).toLocaleString('en-IN') : '—') + '</td>' +
       '<td data-label="Payment Date" style="padding:6px 8px;color:var(--text-muted);">' + (d.live_payment_date ? formatDate(d.live_payment_date) : '—') + '</td>' +
       '<td data-label="Status" style="padding:6px 8px;">' + statusHtml + (d.flagged ? ' <span title="Flagged' + (d.flag_note ? ': ' + _e(d.flag_note) : '') + '" style="cursor:help;">🚩</span>' : '') + '</td>' +
       '<td data-label="" style="padding:6px 8px;white-space:nowrap;">' +

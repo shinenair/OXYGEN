@@ -223,6 +223,13 @@ var LPGReadingService = (function() {
     }
     out.sort(function(a, b) { return (b.year * 100 + b.month) - (a.year * 100 + a.month); });
 
+    // The real payment date is the Bank Statement transaction's date, not
+    // when the payment RECORD was created (which is "today" for a just-run
+    // bank import). Map every bank txn id (both accounts) to its date once.
+    var txnDate = {};
+    try { BankService.getAllTransactions(null).forEach(function(t) { if (t.txn_id) txnDate[String(t.txn_id)] = t.date; }); } catch (eB1) {}
+    try { Bank2Service.getAllTransactions(null).forEach(function(t) { if (t.txn_id) txnDate[String(t.txn_id)] = t.date; }); } catch (eB2) {}
+
     // One call for every LPG payment this unit has ever made, then
     // grouped by month — far cheaper than a lookup per reading row.
     var payMap = {};
@@ -232,7 +239,12 @@ var LPGReadingService = (function() {
         var k = p.month;
         if (!payMap[k]) payMap[k] = { amount: 0, dates: [] };
         payMap[k].amount += Number(p.amount) || 0;
-        if (p.submitted_at) payMap[k].dates.push(p.submitted_at);
+        // Prefer the bank transaction's own date; fall back to the record's
+        // creation time only for payments not posted from a bank line.
+        var ref = String(p.notes || '').match(/BANK:(\S+?)(?:[\s(]|$)/);
+        var dstr = (ref && txnDate[ref[1]]) ? txnDate[ref[1]] : p.submitted_at;
+        var ymd = _lpgYmd(dstr);
+        if (ymd) payMap[k].dates.push(ymd);
       });
     } catch (e) {}
 
@@ -246,9 +258,12 @@ var LPGReadingService = (function() {
       var pay = payMap[nextKey];
 
       if (pay) {
-        r.live_paid_amount = Math.round(pay.amount * 100) / 100;
-        r.live_payment_date = pay.dates.length ? pay.dates.sort().slice(-1)[0].slice(0, 10) : '';
-        r.live_status = Math.abs(r.live_paid_amount - (r.amount || 0)) > 0.5 ? 'Mismatch' : 'Paid';
+        var amt = Number(pay.amount);
+        r.live_paid_amount = isFinite(amt) ? Math.round(amt * 100) / 100 : null;
+        // Dates are already normalized to YYYY-MM-DD, so a lexical sort is
+        // chronological; the latest is the representative payment date.
+        r.live_payment_date = pay.dates.length ? pay.dates.sort().slice(-1)[0] : '';
+        r.live_status = (r.live_paid_amount !== null && Math.abs(r.live_paid_amount - (r.amount || 0)) > 0.5) ? 'Mismatch' : 'Paid';
       } else {
         r.live_paid_amount = null;
         r.live_payment_date = '';
@@ -279,6 +294,23 @@ var LPGReadingService = (function() {
     row[C.FLAGGED_AT] = flagged ? new Date().toISOString() : '';
     Database.updateRow(SHEET, found.rowIndex, row);
     return { success: true };
+  }
+
+  // Normalize any date the bank or a payment record gives back — ISO
+  // ("2025-05-01T…"), DD-Mon-YYYY ("01-May-2025"), or DD/MM/YYYY — to a
+  // canonical YYYY-MM-DD, so dates sort and display consistently. Unknown
+  // shapes pass through unchanged (formatDate handles them client-side).
+  function _lpgYmd(v) {
+    if (v === undefined || v === null || v === '') return '';
+    if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    var s = String(v).trim();
+    var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
+    var mon = { jan:'01', feb:'02', mar:'03', apr:'04', may:'05', jun:'06', jul:'07', aug:'08', sep:'09', oct:'10', nov:'11', dec:'12' };
+    var m = s.match(/^(\d{1,2})[-\/\s]([A-Za-z]{3})[a-z]*[-\/\s](\d{4})/);
+    if (m && mon[m[2].toLowerCase()]) return m[3] + '-' + mon[m[2].toLowerCase()] + '-' + (m[1].length < 2 ? '0' + m[1] : m[1]);
+    var n = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+    if (n) return n[3] + '-' + (n[2].length < 2 ? '0' + n[2] : n[2]) + '-' + (n[1].length < 2 ? '0' + n[1] : n[1]);
+    return s;
   }
 
   // The most recent CURRENT reading strictly before {year, month}.
