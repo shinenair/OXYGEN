@@ -116,27 +116,45 @@ function _makeBankService(SHEET, ACCOUNT) {
     var rows    = _parseCsv(csvString);
     if (rows.length < 2) return { imported: 0, duplicates: 0, errors: ['No data rows found.'] };
 
-    // Find the header row — look for 'Date' in first column
+    // Find the header row. Banks put a block of account-info rows above the
+    // real table, and IOB's 2026 format also prefixes every row with a BLANK
+    // column — so 'Date' is no longer in column 0. Scan the first ~30 rows for
+    // the row that actually looks like the column header: a 'Date' cell
+    // together with a narration/amount cell, in ANY column.
     var headerRowIdx = -1;
-    for (var i = 0; i < Math.min(10, rows.length); i++) {
-      if (rows[i][0] && String(rows[i][0]).toLowerCase().trim() === 'date') {
-        headerRowIdx = i;
-        break;
-      }
+    for (var i = 0; i < Math.min(30, rows.length); i++) {
+      var lc = (rows[i] || []).map(function(h) { return String(h).toLowerCase().trim(); });
+      var hasDate = lc.indexOf('date') > -1;
+      var hasNarr = lc.indexOf('narration') > -1 || lc.indexOf('remarks') > -1 ||
+                    lc.indexOf('description') > -1 || lc.indexOf('particulars') > -1;
+      var hasAmt  = lc.indexOf('credit') > -1 || lc.indexOf('deposit') > -1 ||
+                    lc.indexOf('balance') > -1 || lc.indexOf('withdrawal') > -1;
+      if (hasDate && (hasNarr || hasAmt)) { headerRowIdx = i; break; }
     }
     if (headerRowIdx === -1) headerRowIdx = 0;
 
-    var headers   = rows[headerRowIdx].map(function(h) { return String(h).toLowerCase().trim(); });
-    var colDate   = headers.indexOf('date');
-    var colValDate= headers.indexOf('value date');
-    var colChq    = headers.indexOf('chq no');
-    var colNarr   = headers.indexOf('narration');
-    var colCod    = headers.indexOf('cod');
-    var colDebit  = headers.indexOf('debit');
-    var colCredit = headers.indexOf('credit');
-    var colBal    = headers.indexOf('balance');
+    var headers = rows[headerRowIdx].map(function(h) { return String(h).toLowerCase().trim(); });
+    // Resolve each column by any of its known header aliases — IOB's 2026
+    // format renamed "Narration" -> "Remarks" and "Chq No" -> "CHQ".
+    function _hcol() {
+      for (var a = 0; a < arguments.length; a++) {
+        var idx = headers.indexOf(arguments[a]);
+        if (idx > -1) return idx;
+      }
+      return -1;
+    }
+    var colDate   = _hcol('date', 'txn date', 'transaction date');
+    var colValDate= _hcol('value date', 'value dt');
+    var colChq    = _hcol('chq no', 'chq', 'cheque no', 'cheque');
+    var colNarr   = _hcol('narration', 'remarks', 'description', 'particulars');
+    var colCod    = _hcol('cod');
+    var colDebit  = _hcol('debit', 'withdrawal', 'withdrawals', 'dr', 'withdrawal amt');
+    var colCredit = _hcol('credit', 'deposit', 'deposits', 'cr', 'deposit amt');
+    var colBal    = _hcol('balance', 'closing balance');
 
-    // Fallback by position if headers not found
+    // Fallback by position ONLY when a name match failed — the classic
+    // no-leading-blank layout. When the header row was found by name (both the
+    // old and new IOB formats), these never fire.
     if (colDate   < 0) colDate   = 0;
     if (colValDate< 0) colValDate= 1;
     if (colChq    < 0) colChq    = 2;
