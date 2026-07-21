@@ -157,14 +157,15 @@ var PaymentsService = (function() {
   // Rejected rows are left in place (they're tied to the actual month, not a
   // payment). Amounts, bank references and dates are untouched — only the
   // month a payment is recorded FOR moves. Returns a from→to echo per row.
-  function shiftUnitMonths(unitId, paymentType, offset) {
+  function shiftUnitMonths(unitId, paymentType, offset, year) {
     var unit = String(unitId || '').toUpperCase();
     var off  = Number(offset) || 0;
+    var yr   = Number(year) || 0;   // 0 = no year filter (legacy callers)
     if (!unit || !paymentType) throw new Error('Unit and payment type are required.');
-    if (!off) return { success: true, changed: 0, details: [] };
+    if (!off) return { success: true, changed: 0, skippedBoundary: 0, details: [] };
     var sheet = Database.getSheet(SHEET);
     var rows  = Database.getAll(SHEET);
-    var changed = 0, details = [];
+    var changed = 0, skippedBoundary = 0, details = [];
     for (var i = 0; i < rows.length; i++) {
       if (String(rows[i][C.UNIT_ID]).toUpperCase() !== unit) continue;
       if (String(rows[i][C.PAYMENT_TYPE]) !== paymentType) continue;
@@ -173,16 +174,22 @@ var PaymentsService = (function() {
       var mk = _normMonth(rows[i][C.MONTH]);
       if (!mk) continue;
       var parts = mk.split('-');
-      var y = Number(parts[0]), mo = Number(parts[1]) + off;
-      while (mo < 1)  { mo += 12; y--; }
-      while (mo > 12) { mo -= 12; y++; }
-      var nk = _mk(y, mo);
+      var recY = Number(parts[0]), recM = Number(parts[1]);
+      // Year scope: only touch records in the active/viewed year, so shifting
+      // 2024 never affects 2023 or 2025.
+      if (yr && recY !== yr) continue;
+      var newM = recM + off;
+      // Stay inside the SAME year — a shift that would cross the year boundary
+      // (Jan → prev Dec, or Dec → next Jan) is intentionally left as-is so the
+      // neighbouring year is untouched; those are fixed via the Edit window.
+      if (newM < 1 || newM > 12) { skippedBoundary++; continue; }
+      var nk = _mk(recY, newM);
       sheet.getRange(i + 2, C.MONTH + 1).setValue("'" + nk);
       changed++;
       details.push({ from: mk, to: nk, amount: Number(rows[i][C.AMOUNT]) || 0 });
     }
     if (changed) SpreadsheetApp.flush();
-    return { success: true, changed: changed, details: details };
+    return { success: true, changed: changed, skippedBoundary: skippedBoundary, details: details };
   }
 
   function getAllPayments(filters) {

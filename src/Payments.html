@@ -717,27 +717,37 @@ function feesSaveEdit(paymentId) {
 // payments move (UO markers stay put); amounts and bank dates are unchanged.
 function feesShiftLpgMonth(unitId, offset) {
   var unit = String(unitId).toUpperCase();
-  var affected = 0;
+  var vYear = Number(document.getElementById('fee-f-year').value || (new Date()).getFullYear());
+  // Only this year's LPG payments are in play, and only those that stay inside
+  // the year once shifted — Jan (on −1) or Dec (on +1) would cross into the
+  // neighbouring year, so they're left alone and fixed via the Edit window.
+  var inYear = 0, boundary = 0;
   for (var i = 0; i < paysAll.length; i++) {
     var p = paysAll[i];
     if (String(p.unit_id).toUpperCase() !== unit) continue;
     if (p.payment_type !== 'LPG') continue;
     if (p.status !== 'Verified' && p.status !== 'Pending') continue;
-    affected++;
+    var mm = String(p.month).match(/^(\d{4})-(\d{1,2})/);
+    if (!mm || Number(mm[1]) !== vYear) continue;
+    var newM = Number(mm[2]) + offset;
+    if (newM < 1 || newM > 12) boundary++; else inYear++;
   }
-  if (!affected) { showToast('No LPG payments to shift for ' + unit, 'info'); return; }
+  if (!inYear && !boundary) { showToast('No ' + vYear + ' LPG payments to shift for ' + unit, 'info'); return; }
+  if (!inYear) { showToast('Only a year-boundary month in ' + vYear + ' — fix it via ✏️ Edit', 'info'); return; }
   var dir = offset < 0 ? 'BACK one month' : 'FORWARD one month';
-  var eg  = offset < 0 ? 'e.g. Jan 2024 → Dec 2023' : 'e.g. Dec 2023 → Jan 2024';
-  var ok = confirm('Shift ALL ' + affected + ' LPG payment(s) for ' + unit + ' ' + dir + '?\n\n' +
-    eg + '\n\nThis only changes which month each payment is recorded FOR. ' +
-    'Amounts and bank payment dates are untouched. UO markers stay put.\n\n' +
-    (offset > 0 ? '' : 'You can undo with the ⏩ +1 mo button.\n\n') + 'Continue?');
+  var ok = confirm('Shift ' + inYear + ' LPG payment(s) for ' + unit + ' in ' + vYear + ' ' + dir + '?\n\n' +
+    'Only ' + vYear + ' is affected — ' + (vYear - 1) + ' and ' + (vYear + 1) + ' stay untouched.\n' +
+    (boundary ? boundary + ' payment(s) at the year boundary will be LEFT AS-IS (fix via ✏️ Edit).\n' : '') +
+    '\nThis only changes which month each payment is recorded FOR. Amounts and bank dates are untouched; UO markers stay put.\n\n' +
+    (offset > 0 ? '' : 'Undo with the ⏩ +1 mo button.\n\n') + 'Continue?');
   if (!ok) return;
   doPostWithHistoryConfirm('payments.shiftMonths',
-    { unit_id: unit, payment_type: 'LPG', offset: offset },
+    { unit_id: unit, payment_type: 'LPG', offset: offset, year: vYear },
     function(r) {
       if (r && r.success) {
-        showToast('Shifted ' + (r.data ? r.data.changed : affected) + ' LPG payment(s) for ' + unit, 'success');
+        var n = r.data ? r.data.changed : inYear;
+        var sk = (r.data && r.data.skippedBoundary) ? ' · ' + r.data.skippedBoundary + ' boundary left as-is' : '';
+        showToast('Shifted ' + n + ' LPG payment(s) for ' + unit + ' in ' + vYear + sk, 'success');
         loadPayments();
       } else showToast((r && r.error) || 'Shift failed', 'error');
     },
