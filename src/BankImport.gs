@@ -39,13 +39,61 @@ function importBankFile(payload) {
       var file     = DriveApp.createFile(blob);
       var fileId   = file.getId();
 
-      // Export first sheet as CSV
-      var exportUrl = 'https://docs.google.com/spreadsheets/d/' + fileId + '/export?format=csv&sheet=0';
-      var token     = ScriptApp.getOAuthToken();
-      var response  = UrlFetchApp.fetch(exportUrl, {
-        headers: { 'Authorization': 'Bearer ' + token },
-        muteHttpExceptions: true
-      });
+      // ── Read the converted sheet's RAW values and fix any date swap ──
+      // Indian statements write dates as DD/MM/YYYY. When Google converts the
+      // .xls it can parse those with a US (MM/DD) locale, swapping day and
+      // month (01/02/2026 = 1 Feb becomes 2 Jan). We read the real cell values
+      // and correct that deterministically (see below), then hand the parser
+      // unambiguous ISO dates. Falls back to the old CSV export if this fails.
+      try {
+        var conv = SpreadsheetApp.openById(fileId);
+        var sh0  = conv.getSheets()[0];
+        var lastR = sh0.getLastRow(), lastC = sh0.getLastColumn();
+        if (lastR < 1 || lastC < 1) throw new Error('empty converted sheet');
+        var grid = sh0.getRange(1, 1, lastR, lastC).getValues();
+
+        // Locale-independent date fix. When Google converts the .xls, it may
+        // parse the statement's DD/MM/YYYY dates with a MONTH-FIRST (US) locale,
+        // swapping day and month (01/02 = 1 Feb becomes 2 Jan). Detect it: any
+        // converted real Date whose day-of-month is > 12 proves a DAY-FIRST
+        // conversion (leave as-is); if EVERY converted Date has day <= 12, it
+        // was month-first, so swap day and month back. Dates that stayed as
+        // text (day > 12 can't be a US month) are handled day-first downstream.
+        var sawDate = false, dayFirstConv = false;
+        for (var r = 0; r < grid.length; r++) {
+          for (var c = 0; c < grid[r].length; c++) {
+            var cv = grid[r][c];
+            if (cv instanceof Date && !isNaN(cv.getTime())) { sawDate = true; if (cv.getDate() > 12) dayFirstConv = true; }
+          }
+        }
+        var swap = sawDate && !dayFirstConv;
+        function _pad2(n) { return n < 10 ? '0' + n : String(n); }
+        function _cellStr(v) {
+          if (v instanceof Date && !isNaN(v.getTime())) {
+            var mo = v.getMonth() + 1, dy = v.getDate();
+            if (swap) { var t = mo; mo = dy; dy = t; }
+            return v.getFullYear() + '-' + _pad2(mo) + '-' + _pad2(dy);   // unambiguous ISO
+          }
+          return (v === null || v === undefined) ? '' : String(v);
+        }
+        csvText = grid.map(function(row) { return row.map(function(v) { return _csvQuote(_cellStr(v)); }).join(','); }).join('\n');
+      } catch (readErr) {
+        var exportUrl = 'https://docs.google.com/spreadsheets/d/' + fileId + '/export?format=csv&sheet=0';
+        var token     = ScriptApp.getOAuthToken();
+        var response  = UrlFetchApp.fetch(exportUrl, {
+          headers: { 'Authorization': 'Bearer ' + token },
+          muteHttpExceptions: true
+        });
+        if (response.getResponseCode() !== 200) {
+          try { file.setTrashed(true); } catch (e0) {}
+          return {
+            success: false,
+            error: 'Could not read the statement (HTTP ' + response.getResponseCode() +
+                   '). Please save your bank statement as CSV and try again.'
+          };
+        }
+        csvText = response.getContentText();
+      }
 
       // Archive the ORIGINAL statement in the permanent repository folder —
       // an untouched reference copy for independent verification.
@@ -53,17 +101,7 @@ function importBankFile(payload) {
         var repo = _bankRepoFolder();
         file.setName('IMPORT ' + accountTag + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH.mm') + ' — ' + filename);
         file.moveTo(repo);
-      } catch (mvErr) { file.setTrashed(true); }
-
-      if (response.getResponseCode() !== 200) {
-        return {
-          success: false,
-          error: 'Could not convert XLS to CSV (HTTP ' + response.getResponseCode() +
-                 '). Please save your bank statement as CSV and try again.'
-        };
-      }
-
-      csvText = response.getContentText();
+      } catch (mvErr) { try { file.setTrashed(true); } catch (e1) {} }
     }
 
     if (!csvText || csvText.trim().length < 20) {
@@ -87,6 +125,17 @@ function importBankFile(payload) {
   }
 }
 
+
+// Quote one cell for CSV assembly from a 2-D array of display values:
+// wrap in quotes and double any embedded quotes when it contains a comma,
+// quote or newline.
+function _csvQuote(v) {
+  var s = (v === null || v === undefined) ? '' : String(v);
+  if (s.indexOf('"') > -1 || s.indexOf(',') > -1 || s.indexOf('\n') > -1 || s.indexOf('\r') > -1) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
 
 // The permanent Drive folder holding an untouched copy of every imported
 // bank statement ("OXYGEN Bank Statement Repository").
