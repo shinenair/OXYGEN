@@ -25,6 +25,97 @@ function dmToggleCard(headEl) {
 }
 </script>
 
+<!-- ═══════════ Dec-2024 Benchmark Seed ═══════════ -->
+<div class="card collapsed" style="margin-bottom:20px;border:1.5px solid var(--accent);">
+  <div class="card-header" onclick="dmToggleCard(this)">
+    <span class="card-title">🎯 Seed the Dec-2024 Benchmark (Ultimate Truth)</span>
+    <span class="dm-chevron">+</span>
+  </div>
+  <div class="card-body">
+    <div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;font-size:13px;line-height:1.6;">
+      <strong>💡 What this does:</strong> Loads the corrected 2024 truth (Maintenance ₹1,500/mo,
+      Waste ₹170/mo, LPG Dec-2024, plus Lift AMC &amp; Extras) as the authoritative baseline.
+      It is <strong>additive and non-destructive</strong>: it only <strong>adds paid records your
+      ledger is missing</strong>, never deletes or overwrites — so bank-posted records and their
+      links are preserved. Re-running is safe (already-present records are skipped).<br>
+      <strong>Always Preview first</strong> — it shows exactly what would be added and lists any
+      <strong>conflicts</strong> (months your ledger marks paid but the truth sheet says unpaid) for
+      you to review manually.
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+      <button class="btn btn-outline" id="bm-preview-btn" onclick="bmPreview()">🔍 Preview (no changes)</button>
+      <button class="btn btn-accent" id="bm-commit-btn" onclick="bmCommit()" disabled style="opacity:.5;">✅ Commit — add missing records</button>
+    </div>
+    <div id="bm-status"></div>
+    <div id="bm-result" style="margin-top:12px;"></div>
+  </div>
+</div>
+
+<script>
+var bmPreviewed = false;
+function bmEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function bmRupees(n){ return '₹' + Math.round(Number(n)||0).toLocaleString('en-IN'); }
+function bmPreview() {
+  var st = document.getElementById('bm-status');
+  st.innerHTML = '<div style="font-size:13px;color:var(--text-muted);">Comparing the benchmark against your live ledger…</div>';
+  document.getElementById('bm-result').innerHTML = '';
+  google.script.run
+    .withSuccessHandler(function(res){
+      if (!res || !res.success || !res.data) { st.innerHTML = '<div style="color:var(--c-rejected-fg);font-size:13px;">'+bmEsc((res&&res.error)||'Preview failed')+'</div>'; return; }
+      var d = res.data;
+      var h = '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:var(--bg-surface2);">' +
+        '<th style="text-align:left;padding:7px 10px;">Category</th><th style="text-align:right;padding:7px 10px;">To add</th><th style="text-align:right;padding:7px 10px;">Already present</th><th style="text-align:right;padding:7px 10px;">₹ added</th></tr></thead><tbody>';
+      (d.categories||[]).forEach(function(c){
+        h += '<tr style="border-top:1px solid var(--border);"><td style="padding:6px 10px;font-weight:600;">'+bmEsc(c.label)+'</td>' +
+          '<td style="text-align:right;padding:6px 10px;font-weight:700;color:var(--c-verified-fg);">'+c.toAdd+'</td>' +
+          '<td style="text-align:right;padding:6px 10px;color:var(--text-muted);">'+c.present+'</td>' +
+          '<td style="text-align:right;padding:6px 10px;">'+bmRupees(c.addAmt)+'</td></tr>';
+      });
+      h += '</tbody><tfoot><tr style="border-top:2px solid var(--border);font-weight:800;background:var(--bg-surface2);">' +
+        '<td style="padding:7px 10px;">TOTAL</td><td style="text-align:right;padding:7px 10px;color:var(--c-verified-fg);">'+d.totalToAdd+'</td><td></td><td style="text-align:right;padding:7px 10px;">'+bmRupees(d.totalAddAmount)+'</td></tr></tfoot></table></div>';
+
+      if (d.conflictCount > 0) {
+        h += '<div style="margin-top:12px;border:1px solid var(--c-rejected-fg);border-radius:8px;padding:10px 12px;">' +
+          '<div style="font-weight:700;color:var(--c-rejected-fg);margin-bottom:6px;">⚠️ '+d.conflictCount+' conflict(s) — your ledger marks these paid, but the truth sheet does not. These are NOT changed; review &amp; fix manually if needed.</div>' +
+          '<div style="max-height:180px;overflow:auto;font-size:11.5px;font-family:monospace;">';
+        (d.conflicts||[]).forEach(function(c){ h += bmEsc(c.unit)+' · '+bmEsc(c.type)+' · '+bmEsc(c.month)+' · '+bmRupees(c.amount)+'<br>'; });
+        if (d.conflictCount > (d.conflicts||[]).length) h += '…and '+(d.conflictCount-(d.conflicts||[]).length)+' more';
+        h += '</div></div>';
+      } else {
+        h += '<div style="margin-top:10px;font-size:12.5px;color:var(--c-verified-fg);">✓ No conflicts — your ledger agrees with the truth sheet everywhere it already has records.</div>';
+      }
+      document.getElementById('bm-result').innerHTML = h;
+      st.innerHTML = '<div style="font-size:13px;">Preview ready. Review above, then Commit to add the '+d.totalToAdd+' missing record(s).</div>';
+      bmPreviewed = true;
+      var cb = document.getElementById('bm-commit-btn');
+      cb.disabled = (d.totalToAdd === 0);
+      cb.style.opacity = (d.totalToAdd === 0) ? '.5' : '1';
+    })
+    .withFailureHandler(function(e){ st.innerHTML = '<div style="color:var(--c-rejected-fg);font-size:13px;">Error: '+bmEsc(e && e.message ? e.message : e)+'</div>'; })
+    .doPost_internal('benchmark.preview', {});
+}
+function bmCommit() {
+  if (!bmPreviewed) { alert('Run Preview first.'); return; }
+  if (!confirm('Add the missing benchmark records to the ledger?\n\nThis only ADDS records that are missing — nothing is deleted or overwritten. Conflicts you saw in the preview are left untouched.')) return;
+  var st = document.getElementById('bm-status');
+  st.innerHTML = '<div style="font-size:13px;color:var(--text-muted);">Writing benchmark records…</div>';
+  var btn = document.getElementById('bm-commit-btn'); btn.disabled = true; btn.style.opacity = '.5';
+  google.script.run
+    .withSuccessHandler(function(res){
+      if (res && res.success && res.data) {
+        st.innerHTML = '<div style="font-size:13px;color:var(--c-verified-fg);font-weight:700;">✅ Done — added '+res.data.added+' record(s). Re-run Preview to confirm 0 remaining.</div>';
+      } else {
+        st.innerHTML = '<div style="color:var(--c-rejected-fg);font-size:13px;">'+bmEsc((res&&res.error)||'Commit failed')+'</div>';
+        btn.disabled = false; btn.style.opacity = '1';
+      }
+      bmPreviewed = false;
+    })
+    .withFailureHandler(function(e){ st.innerHTML = '<div style="color:var(--c-rejected-fg);font-size:13px;">Error: '+bmEsc(e && e.message ? e.message : e)+'</div>'; btn.disabled = false; btn.style.opacity = '1'; })
+    .doPost_internal('benchmark.commit', {});
+}
+</script>
+
 <!-- ═══════════ Historic Owners & Residents Import ═══════════ -->
 <div class="card collapsed" style="margin-bottom:20px;">
   <div class="card-header" onclick="dmToggleCard(this)">

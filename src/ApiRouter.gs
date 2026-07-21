@@ -188,6 +188,7 @@ var ApiRouter = (function() {
     'caretaker.deleteByMonth': 1, 'caretaker.setSeed': 1,
     'bank.assignPortions': 1, 'portions.removeAllocations': 1, 'payments.deleteRecord': 1, 'bank.unmatch': 1,
     'payments.shiftMonths': 1, 'payments.moveCells': 1,
+    'benchmark.preview': 1, 'benchmark.commit': 1,
     'planner.addRule': 1, 'planner.updateRule': 1, 'planner.deleteRule': 1, 'planner.seed': 1, 'planner.syncCalendar': 1,
     'committee.add': 1, 'committee.update': 1, 'committee.delete': 1,
     'committee.archive': 1, 'committee.autoAllocate': 1, 'committee.seed': 1,
@@ -519,6 +520,8 @@ var ApiRouter = (function() {
       case 'fees.setSchedule':    return SettingsService.setFeeSchedule(data);
       case 'fees.deleteSchedule': return SettingsService.deleteFeeSchedule(data.schedule_id);
       case 'fees.forMonth':       return { amount: SettingsService.feeForMonth(data.fee_type, data.month) };
+      case 'benchmark.preview':   return BenchmarkSeed.preview();
+      case 'benchmark.commit':    return BenchmarkSeed.commit();
 
       // Corpus Fund (Admin-only — every function also self-checks via
       // UsersService.requireAdmin(), independent of this gate below)
