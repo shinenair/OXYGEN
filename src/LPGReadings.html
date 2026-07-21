@@ -44,6 +44,7 @@
 <div class="lpg-filters">
   <select id="lpg-year" onchange="lpgLoadMonth()"></select>
   <select id="lpg-month" onchange="lpgLoadMonth()">
+    <option value="all">📅 All Months</option>
     <option value="1">January</option><option value="2">February</option>
     <option value="3">March</option><option value="4">April</option>
     <option value="5">May</option><option value="6">June</option>
@@ -124,10 +125,30 @@ function lpgFetchUOMarkers(year, month) {
     .doPost_internal('tenants.getResidentByMonth', { year: year, month: month });
 }
 
+var lpgAllMonths = false;  // "All Months" overview mode
+var lpgYearData  = [];     // flat list of every reading in the year (overview)
+
 function lpgLoadMonth() {
   var year = Number(document.getElementById('lpg-year').value);
-  var month = Number(document.getElementById('lpg-month').value);
+  var monthVal = document.getElementById('lpg-month').value;
   document.getElementById('lpg-table').innerHTML = loadingHtml('Loading readings…');
+
+  // ── All-Months overview: every reading in the year, read-only ──
+  if (monthVal === 'all') {
+    lpgAllMonths = true;
+    var note = document.getElementById('lpg-rate-note');
+    if (note) note.textContent = 'Showing every reading in ' + year + ' — read-only overview';
+    google.script.run.withSuccessHandler(function(r) {
+      lpgYearData = (r && r.success && r.data) ? r.data : [];
+      lpgRender();
+    }).withFailureHandler(function(e) {
+      document.getElementById('lpg-table').innerHTML = '<div style="color:var(--c-rejected-fg);padding:16px;">Error: ' + e + '</div>';
+    }).doPost_internal('lpg.getYear', { year: year });
+    return;
+  }
+
+  lpgAllMonths = false;
+  var month = Number(monthVal);
   google.script.run.withSuccessHandler(function(r) {
     lpgMonthData = (r && r.success && r.data) ? r.data : {};
     lpgFetchUOMarkers(year, month);
@@ -158,6 +179,7 @@ function lpgStatus(u, d) {
 }
 
 function lpgRender() {
+  if (lpgAllMonths) { lpgRenderAll(); return; }
   var q = (document.getElementById('lpg-search').value || '').toLowerCase();
   var filter = document.getElementById('lpg-filter').value;
 
@@ -244,6 +266,68 @@ function lpgRender() {
     '<table><thead><tr><th>#</th><th>Unit / Tenant</th><th>Status</th><th style="text-align:right">Previous Reading</th>' +
     '<th>Current Reading</th><th>Reading Date</th><th style="text-align:right">Consumed</th><th style="text-align:right">Amount</th>' +
     '<th>Payment</th><th>Remarks</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+// ── All-Months overview: every reading in the year, read-only, grouped by
+// unit so gaps and odd jumps are easy to spot. Honours the search box and the
+// Paid / Not Paid / Amount-Mismatch filters (the occupancy-only filters don't
+// apply to actual reading rows).
+function lpgRenderAll() {
+  var q = (document.getElementById('lpg-search').value || '').toLowerCase();
+  var filter = document.getElementById('lpg-filter').value;
+  var mn = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  var ownerBy = {};
+  for (var i = 0; i < lpgUnits.length; i++) ownerBy[String(lpgUnits[i].id).toUpperCase()] = lpgUnits[i].owner || '';
+
+  var rows = '', totalAmount = 0, totalPaid = 0, count = 0, mismatchCount = 0, unpaidCount = 0, lastUnit = '';
+  for (var j = 0; j < lpgYearData.length; j++) {
+    var d = lpgYearData[j];
+    var uid = String(d.unit_id).toUpperCase();
+    var owner = ownerBy[uid] || '';
+    var isPaid = !!d.payment_date;
+    var mismatch = d.paid_amount !== null && d.amount !== null && Math.abs(Number(d.paid_amount) - Number(d.amount)) > 0.5;
+
+    if (q && uid.toLowerCase().indexOf(q) === -1 && owner.toLowerCase().indexOf(q) === -1) continue;
+    if (filter === 'paid'     && !isPaid) continue;
+    if (filter === 'unpaid'   && isPaid) continue;
+    if (filter === 'mismatch' && !mismatch) continue;
+
+    count++;
+    totalAmount += Number(d.amount) || 0;
+    if (isPaid) totalPaid += Number(d.paid_amount) || 0;
+    if (mismatch) mismatchCount++;
+    if (!isPaid) unpaidCount++;
+
+    var newUnit = (uid !== lastUnit); lastUnit = uid;
+    var statusPill = mismatch ? '<span class="lpg-pill lpg-p-pend" title="Paid ≠ calculated">⚠ Mismatch</span>'
+      : isPaid ? '<span class="lpg-pill lpg-p-read">Paid</span>'
+      : '<span class="lpg-pill lpg-p-pend">Unpaid</span>';
+
+    rows += '<tr' + (newUnit ? ' style="border-top:2px solid var(--border-strong);"' : '') + '>' +
+      '<td><strong style="color:var(--accent);cursor:pointer" onclick="openUnitProfile(\'' + uid + '\')">' + uid + '</strong>' +
+        (newUnit && owner ? '<div style="font-size:10px;color:var(--text-muted);">' + lpgE(owner) + '</div>' : '') + '</td>' +
+      '<td style="font-weight:600;">' + (mn[d.month] || d.month) + '</td>' +
+      '<td style="text-align:right;color:var(--text-muted)">' + (d.previous_reading != null ? d.previous_reading : '—') + '</td>' +
+      '<td style="text-align:right;">' + (d.current_reading != null ? d.current_reading : '—') + '</td>' +
+      '<td>' + (d.reading_date ? formatDate(d.reading_date) : '—') + '</td>' +
+      '<td style="text-align:right;">' + (d.consumed != null ? Number(d.consumed).toFixed(3) : '—') + '</td>' +
+      '<td style="text-align:right;font-weight:700;">' + (d.amount != null && isFinite(d.amount) ? '₹' + Math.round(d.amount).toLocaleString('en-IN') : '—') + '</td>' +
+      '<td style="text-align:right;">' + (d.paid_amount != null && isFinite(d.paid_amount) ? '₹' + Math.round(d.paid_amount).toLocaleString('en-IN') : '—') + '</td>' +
+      '<td>' + (d.payment_date ? formatDate(d.payment_date) : '—') + '</td>' +
+      '<td>' + statusPill + (d.flagged ? ' 🚩' : '') + '</td>' +
+      '</tr>';
+  }
+
+  document.getElementById('lpg-stats').innerHTML =
+    '<div class="stat-card gold"><div class="stat-label">Readings in Year</div><div class="stat-value">' + count + '</div><div class="stat-sub">all months</div></div>' +
+    '<div class="stat-card green"><div class="stat-label">Total Calculated</div><div class="stat-value" style="font-size:19px">' + formatRupees(totalAmount) + '</div><div class="stat-sub">Paid: ' + formatRupees(totalPaid) + '</div></div>' +
+    '<div class="stat-card red"><div class="stat-label">Unpaid Rows</div><div class="stat-value">' + unpaidCount + '</div><div class="stat-sub">no payment date</div></div>' +
+    '<div class="stat-card info"><div class="stat-label">Mismatches</div><div class="stat-value">' + mismatchCount + '</div><div class="stat-sub">paid ≠ calculated</div></div>';
+
+  document.getElementById('lpg-table').innerHTML = !count
+    ? '<div style="padding:16px;color:var(--text-muted);">No readings recorded for this year.</div>'
+    : '<table><thead><tr><th>Unit</th><th>Month</th><th style="text-align:right">Prev</th><th style="text-align:right">Curr</th><th>Reading Date</th><th style="text-align:right">Consumed</th><th style="text-align:right">Amount</th><th style="text-align:right">Paid</th><th>Payment Date</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
 function lpgSelectRow(uid) {

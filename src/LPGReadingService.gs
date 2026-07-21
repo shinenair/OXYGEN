@@ -181,6 +181,22 @@ var LPGReadingService = (function() {
     return out;
   }
 
+  // Every reading for one year, across all units — a flat list sorted by unit
+  // then month, for the "All Months" overview that lets a manager scan a
+  // unit's whole year at once and spot gaps or odd jumps.
+  function getYear(year) {
+    var yr = Number(year), rows = _rows(), out = [];
+    for (var i = 0; i < rows.length; i++) {
+      if (Number(rows[i][C.YEAR]) === yr) out.push(_toObj(rows[i]));
+    }
+    out.sort(function(a, b) {
+      var au = String(a.unit_id || '').toUpperCase(), bu = String(b.unit_id || '').toUpperCase();
+      if (au !== bu) return au < bu ? -1 : 1;
+      return (a.month || 0) - (b.month || 0);
+    });
+    return out;
+  }
+
   // For every unit that has NO reading row yet for {year, month}, the most
   // recent prior current-reading (the value that WOULD carry forward).
   // Lets the page show "last: 92.957" on a still-pending row.
@@ -462,6 +478,7 @@ var LPGReadingService = (function() {
   return {
     ensureColumns:      ensureColumns,
     getMonth:           getMonth,
+    getYear:            getYear,
     getMonthSummary:    getMonthSummary,
     deleteReadingsByMonth: deleteReadingsByMonth,
     getUnitHistory:     getUnitHistory,

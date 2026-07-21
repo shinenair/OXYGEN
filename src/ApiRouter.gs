@@ -339,6 +339,7 @@ var ApiRouter = (function() {
 
       // LPG meter readings
       case 'lpg.getMonth':        return LPGReadingService.getMonth(data.year, data.month);
+      case 'lpg.getYear':         return LPGReadingService.getYear(data.year);
       case 'lpg.getUnitHistory':  return LPGReadingService.getUnitHistory(data.unit_id);
       case 'lpg.saveReading':     return LPGReadingService.saveReading(data);
       case 'lpg.deleteReading':   return LPGReadingService.deleteReading(data.reading_id);
