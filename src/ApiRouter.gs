@@ -758,12 +758,11 @@ var ApiRouter = (function() {
       }
     } catch (recErr) {}
 
-    var settingsAll = SettingsService.getAll();
     return { months: months, balance: latest, payments: pRows, recon: recon,
              units: units, owners: owners, tenants: tenants,
              activeYear: settingsYear, viewYear: activeYear,
-             feeMaintenance: Number(settingsAll.fee_maintenance) || 0,
-             feeWaste: Number(settingsAll.fee_waste) || 0 };
+             feeMaintenance: SettingsService.feeForMonth('Maintenance', '') || 0,
+             feeWaste: SettingsService.feeForMonth('Waste Management', '') || 0 };
   }
 
   return { route: route };

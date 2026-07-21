@@ -288,6 +288,9 @@ function settingsRender(schema) {
     }
 
     html += '</div></div>';
+    // The Fee Schedule (Maintenance/Waste amounts by month) belongs with the
+    // Payment Fees settings — render it right after that group.
+    if (groupName === 'Payment Fees') html += feeScheduleGroupHtml();
   }
 
   // User Administration (admins only see this page at all)
@@ -320,30 +323,6 @@ function settingsRender(schema) {
       '<button class="btn btn-accent btn-sm" onclick="lrSet()">+ Set Rate</button>'+
     '</div>'+
     '<div id="lr-list"><div class="loading"><div class="spinner"></div></div></div>'+
-    '</div>';
-
-  // Fee Schedule — effective-dated fee amounts (e.g. Maintenance was ₹1,500
-  // up to Feb 2025, then ₹2,000 from Mar 2025). Each entry is "from this
-  // month onward, the fee is ₹X"; past months keep their old amount.
-  html += '<div class="settings-group collapsed" id="sg-feesched">'+
-    '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">📅</div>Fee Schedule (amount by month)</span><span class="settings-toggle-chevron">+</span></div>'+
-    '<div style="font-size:12px;color:var(--text-muted);padding:0 4px 10px;">Set a fee amount effective from a given month onward — e.g. Maintenance was ₹1,500 up to Feb 2025, then ₹2,000 from Mar 2025. When you record a payment, the amount for that month is taken from here. Changing a rate never alters past months.</div>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'+
-      '<select id="fs-type" style="padding:8px 10px;font-size:13px;">'+
-        '<option value="Maintenance">Maintenance</option>'+
-        '<option value="Waste Management">Waste Management</option>'+
-      '</select>'+
-      '<span style="font-size:12px;color:var(--text-muted);">from</span>'+
-      '<select id="fs-year" style="padding:8px 10px;font-size:13px;"></select>'+
-      '<select id="fs-month" style="padding:8px 10px;font-size:13px;">'+
-        '<option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option><option value="4">Apr</option>'+
-        '<option value="5">May</option><option value="6">Jun</option><option value="7">Jul</option><option value="8">Aug</option>'+
-        '<option value="9">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>'+
-      '</select>'+
-      '<input id="fs-amount" type="number" step="1" placeholder="Amount (₹)" style="width:130px;padding:8px 10px;font-size:13px;">'+
-      '<button class="btn btn-accent btn-sm" onclick="fsSet()">+ Set Fee</button>'+
-    '</div>'+
-    '<div id="fs-list"><div class="loading"><div class="spinner"></div></div></div>'+
     '</div>';
 
   // Expense Category Auto-Match Patterns — recurring monthly payments
@@ -547,6 +526,30 @@ function lrDelete(rateId) {
 }
 
 // ── Fee Schedule (effective-dated fee amounts) ──────────────────
+// Rendered inside settingsRender right after the Payment Fees group, so all
+// fee-amount settings sit together. Maintenance & Waste amounts live here now.
+function feeScheduleGroupHtml() {
+  return '<div class="settings-group collapsed" id="sg-feesched">'+
+    '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">📅</div>Fee Schedule — Maintenance &amp; Waste (amount by month)</span><span class="settings-toggle-chevron">+</span></div>'+
+    '<div style="font-size:12px;color:var(--text-muted);padding:0 4px 10px;">The Maintenance &amp; Waste Management amounts live here (they replaced the old single "Current fee" boxes). Set an amount effective from a given month onward — e.g. Maintenance was ₹1,500 up to Feb 2025, then ₹2,000 from Mar 2025. Recording a payment, and bank-statement detection, both use these; changing a rate never alters past months.</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'+
+      '<select id="fs-type" style="padding:8px 10px;font-size:13px;">'+
+        '<option value="Maintenance">Maintenance</option>'+
+        '<option value="Waste Management">Waste Management</option>'+
+      '</select>'+
+      '<span style="font-size:12px;color:var(--text-muted);">from</span>'+
+      '<select id="fs-year" style="padding:8px 10px;font-size:13px;"></select>'+
+      '<select id="fs-month" style="padding:8px 10px;font-size:13px;">'+
+        '<option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option><option value="4">Apr</option>'+
+        '<option value="5">May</option><option value="6">Jun</option><option value="7">Jul</option><option value="8">Aug</option>'+
+        '<option value="9">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>'+
+      '</select>'+
+      '<input id="fs-amount" type="number" step="1" placeholder="Amount (₹)" style="width:130px;padding:8px 10px;font-size:13px;">'+
+      '<button class="btn btn-accent btn-sm" onclick="fsSet()">+ Set Fee</button>'+
+    '</div>'+
+    '<div id="fs-list"><div class="loading"><div class="spinner"></div></div></div>'+
+    '</div>';
+}
 function fsLoad() {
   var now = new Date();
   var ySel = document.getElementById('fs-year');

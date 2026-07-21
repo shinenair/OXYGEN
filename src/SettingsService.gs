@@ -22,10 +22,11 @@ var SettingsService = (function() {
     { key:'screenshots_folder_url', group:'Payment Screenshots', label:'Payment confirmation screenshots — Drive folder URL', type:'text', default:'', hint:'The Drive folder where WhatsApp payment-confirmation screenshots are uploaded. Name each file with the flat (e.g. A101_15Jan.jpg) so the unit is captured.' },
 
     // ── Payment Fees ──────────────────────────────────────────
-    { key:'fee_maintenance',      group:'Payment Fees',        label:'Current Maintenance Fee (₹)',     type:'number',   default:'2000',   hint:'The maintenance charge in effect now — used first when detecting payments' },
-    { key:'fee_maintenance_history', group:'Payment Fees',     label:'Other Maintenance Fee amounts (₹, comma-separated)', type:'text', default:'1500', hint:'Older/alternate MF amounts, e.g. 1500. These and their multiples are also recognised in bank statements' },
-    { key:'fee_waste',            group:'Payment Fees',        label:'Current Waste Management Fee (₹)', type:'number',   default:'170',    hint:'The waste management charge in effect now' },
-    { key:'fee_waste_history',    group:'Payment Fees',        label:'Other Waste Mgmt Fee amounts (₹, comma-separated)', type:'text', default:'', hint:'Older/alternate WMF amounts. These and their multiples are also recognised' },
+    // Maintenance & Waste Management amounts are NOT here anymore — they live
+    // in the effective-dated Fee Schedule (amount by month) below, which is the
+    // single source of truth for them (current amount, history, and bank
+    // detection all derive from it). LPG uses its own Rate History; the rest
+    // are flat one-off amounts.
     { key:'lpg_conv_factor',   group:'Payment Fees', label:'LPG Conversion Factor (Kg per NM³) — fallback', type:'number', default:'2.6',   hint:'Used only for months with no rate history entry below' },
     { key:'lpg_price_per_kg',  group:'Payment Fees', label:'LPG Price per Kg (₹) — fallback',               type:'number', default:'78.31', hint:'Used only for months with no rate history entry below' },
     { key:'lpg_min_cylinders', group:'Payment Fees', label:'LPG Minimum Cylinder Stock (reorder threshold)', type:'number', default:'5', hint:'Net stock at or below this triggers "Order LPG Cylinders"' },
@@ -141,6 +142,9 @@ var SettingsService = (function() {
     var now = new Date().toISOString();
     sheet.appendRow([Database.generateId('FSC'), 'Maintenance', 2020, 1, 1500, 'System', now]);
     sheet.appendRow([Database.generateId('FSC'), 'Maintenance', 2025, 3, 2000, 'System', now]);
+    // Waste Management has been a flat ₹170 — seed it so the schedule is the
+    // single source of truth for it too (was previously the fee_waste setting).
+    sheet.appendRow([Database.generateId('FSC'), 'Waste Management', 2020, 1, 170, 'System', now]);
     return sheet;
   }
 
@@ -209,13 +213,29 @@ var SettingsService = (function() {
       if (key <= target && key > bestKey) { bestKey = key; best = list[i].amount; }
     }
     if (best !== null) return best;
-    // No schedule entry on/before the target month — fall back to the plain
-    // current-fee setting for that type, if there is one.
-    var fallbackKey = feeType === 'Maintenance' ? 'fee_maintenance'
-                    : feeType === 'Waste Management' ? 'fee_waste'
-                    : feeType === 'Caution Deposit' ? 'fee_caution_deposit' : '';
-    var fv = fallbackKey ? Number(get(fallbackKey)) : 0;
-    return isNaN(fv) ? 0 : fv;
+    // No schedule entry on/before the target month — use a sane default so a
+    // never-seeded install still behaves (Caution Deposit still lives as a
+    // plain setting, so read it directly).
+    if (feeType === 'Maintenance')      return 2000;
+    if (feeType === 'Waste Management')  return 170;
+    if (feeType === 'Caution Deposit')  { var cv = Number(get('fee_caution_deposit')); return isNaN(cv) ? 1600 : cv; }
+    return 0;
+  }
+
+  // Distinct fee amounts ever in force for a type, newest-effective first —
+  // used by bank-statement detection so both the current and any historical
+  // amount (e.g. ₹2,000 and ₹1,500 for Maintenance) are recognised, derived
+  // straight from the schedule instead of a separate hand-maintained list.
+  function feeAmountsForType(feeType) {
+    var list = listFeeSchedule(feeType);
+    var seen = {}, out = [];
+    // Latest effective-from first, so the current amount takes priority.
+    list.sort(function(a, b) { return (b.year * 12 + b.month) - (a.year * 12 + a.month); });
+    for (var i = 0; i < list.length; i++) {
+      var a = Number(list[i].amount);
+      if (a > 0 && !seen[a]) { seen[a] = true; out.push(a); }
+    }
+    return out;
   }
 
   function set(key, value) {
@@ -268,6 +288,7 @@ var SettingsService = (function() {
     listFeeSchedule:  listFeeSchedule,
     setFeeSchedule:   setFeeSchedule,
     deleteFeeSchedule: deleteFeeSchedule,
-    feeForMonth:      feeForMonth
+    feeForMonth:      feeForMonth,
+    feeAmountsForType: feeAmountsForType
   };
 })();

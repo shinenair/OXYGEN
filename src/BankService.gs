@@ -507,14 +507,13 @@ function _makeBankService(SHEET, ACCOUNT) {
     var fees = { 'Maintenance': [2000, 1500], 'Waste Management': [170] };
     try {
       var s = SettingsService.getAll();
-      var mf = [];
-      if (s.fee_maintenance && !isNaN(Number(s.fee_maintenance))) mf.push(Number(s.fee_maintenance));
-      mf = mf.concat(_parseFeeList(s.fee_maintenance_history));
+      // Maintenance & Waste amounts come from the Fee Schedule now (the single
+      // source of truth) — every distinct amount ever in force is recognised
+      // in statements, current amount first.
+      var mf = SettingsService.feeAmountsForType('Maintenance');
       if (mf.length) fees['Maintenance'] = mf;
 
-      var wf = [];
-      if (s.fee_waste && !isNaN(Number(s.fee_waste))) wf.push(Number(s.fee_waste));
-      wf = wf.concat(_parseFeeList(s.fee_waste_history));
+      var wf = SettingsService.feeAmountsForType('Waste Management');
       if (wf.length) fees['Waste Management'] = wf;
 
       if (s.fee_lpg_default && !isNaN(Number(s.fee_lpg_default))) fees['LPG'] = [Number(s.fee_lpg_default)];
