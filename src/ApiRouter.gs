@@ -187,7 +187,7 @@ var ApiRouter = (function() {
     'expensePatterns.add': 1, 'expensePatterns.delete': 1,
     'caretaker.deleteByMonth': 1, 'caretaker.setSeed': 1,
     'bank.assignPortions': 1, 'portions.removeAllocations': 1, 'payments.deleteRecord': 1, 'bank.unmatch': 1,
-    'payments.shiftMonths': 1,
+    'payments.shiftMonths': 1, 'payments.moveCells': 1,
     'planner.addRule': 1, 'planner.updateRule': 1, 'planner.deleteRule': 1, 'planner.seed': 1, 'planner.syncCalendar': 1,
     'committee.add': 1, 'committee.update': 1, 'committee.delete': 1,
     'committee.archive': 1, 'committee.autoAllocate': 1, 'committee.seed': 1,
@@ -296,6 +296,7 @@ var ApiRouter = (function() {
       case 'payments.getStats':       return PaymentsService.getPaymentStats();
       case 'payments.bankDate':       return _resolveBankDate(data.txn_id);
       case 'payments.shiftMonths':    return PaymentsService.shiftUnitMonths(data.unit_id, data.payment_type, data.offset, data.year, data.from_month);
+      case 'payments.moveCells':      return PaymentsService.moveUnitCells(data.unit_id, data.payment_type, data.year, data.source_months, data.offset);
 
       // Export
       case 'export.units':         return ExportService.exportUnitsReport();

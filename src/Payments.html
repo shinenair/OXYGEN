@@ -113,6 +113,12 @@
   }
   #fees-table td.fee-td { padding:4px 3px; }
   #fees-table .fee-sticky { position:-webkit-sticky;position:sticky;left:0;background:var(--bg-surface);z-index:2; }
+  /* Drag-and-drop month redistribution (LPG) */
+  .fee-cell.lpg-move { cursor:grab; }
+  .fee-cell.lpg-move:active { cursor:grabbing; }
+  .fee-cell.lpg-sel { outline:2.5px solid var(--accent);outline-offset:-2px;box-shadow:0 0 0 2px var(--accent) inset; }
+  #fees-table td.fee-td.drop-ok  { outline:2.5px dashed var(--c-verified-fg);outline-offset:-3px;background:rgba(16,185,129,.15); }
+  #fees-table td.fee-td.drop-bad { outline:2.5px dashed var(--c-rejected-fg);outline-offset:-3px;background:rgba(239,68,68,.12); }
 </style>
 
 <script>
@@ -226,6 +232,8 @@ function feesPaidInfo(unitId, type, year, monthNum) {
 }
 
 function feesRender() {
+  // A re-render rebuilds every cell, so any drag-selection is stale — reset it.
+  lpgSelUnit = null; lpgSel = {}; lpgDragMon = null;
   // Tab highlight
   var tabs = { 'Maintenance':'fee-tab-mf', 'Waste Management':'fee-tab-wm', 'LPG':'fee-tab-lpg',
                'Caution Deposit':'fee-tab-cd', 'Party Hall Rental':'fee-tab-ph', 'Miscellaneous':'fee-tab-ms' };
@@ -326,6 +334,12 @@ function feesRender() {
         isUO = effOcc === 'Unoccupied' || (feesType === 'LPG' && effLpg !== 'Using');
       }
       var info = feesPaidInfo(u.unit_id, feesType, year, m);
+      // For LPG, every real month-cell is a drop target and paid cells can be
+      // dragged onto empty months (spreadsheet-style redistribution).
+      var lpgU = feeE(u.unit_id);
+      var lpgDrop = (feesType === 'LPG')
+        ? ' data-unit="' + lpgU + '" data-mon="' + m + '" ondragover="feesLpgOver(event,' + m + ')" ondragleave="feesLpgLeave(event)" ondrop="feesLpgDrop(event,\'' + lpgU + '\',' + m + ')"'
+        : '';
       if (info === 'POLICY') {
         cells += '<td class="fee-td"><div class="fee-cell fee-cell-policy" title="' + names[m-1] + ' ' + year + ': paid (2023–25 policy)">Paid</div></td>';
       } else if (info && info.status === 'UO') {
@@ -336,18 +350,24 @@ function feesRender() {
         var src = String(info.notes || '').indexOf('BANK:') === 0 ? ' 🏦' : '';
         rowTotal += Number(info.amount) || 0;
         rowPaidCount++;
-        cells += '<td class="fee-td"><div class="fee-cell fee-cell-paid" title="' + names[m-1] + ' ' + year + ': ₹' +
-          Math.round(Number(info.amount)).toLocaleString('en-IN') + src + ' — click to see every record behind this amount" ' +
-          'onclick="feesShowCellRecords(\'' + feeE(u.unit_id) + '\',' + year + ',' + m + ')">₹' +
-          Math.round(Number(info.amount)).toLocaleString('en-IN') + '</div></td>';
+        var amtTxt = '₹' + Math.round(Number(info.amount)).toLocaleString('en-IN');
+        if (feesType === 'LPG') {
+          cells += '<td class="fee-td"' + lpgDrop + '><div class="fee-cell fee-cell-paid lpg-move" draggable="true" data-lpgcell="' + lpgU + '|' + m + '" ' +
+            'title="' + names[m-1] + ' ' + year + ': ' + amtTxt + src + ' — drag onto an empty month to move it · Shift/Ctrl-click to select several · click to see records" ' +
+            'ondragstart="feesLpgDragStart(event,\'' + lpgU + '\',' + m + ')" ' +
+            'onclick="feesLpgCellClick(event,\'' + lpgU + '\',' + year + ',' + m + ',true)">' + amtTxt + '</div></td>';
+        } else {
+          cells += '<td class="fee-td"><div class="fee-cell fee-cell-paid" title="' + names[m-1] + ' ' + year + ': ' + amtTxt + src + ' — click to see every record behind this amount" ' +
+            'onclick="feesShowCellRecords(\'' + feeE(u.unit_id) + '\',' + year + ',' + m + ')">' + amtTxt + '</div></td>';
+        }
       } else if (isUO) {
         cells += '<td class="fee-td"><div class="fee-cell fee-cell-uo" title="' + names[m-1] + ' ' + year + ': Unoccupied — ' + feesType + ' not applicable">UO</div></td>';
       } else if (FEES_OBLIGATORY[feesType]) {
         rowPendingCount++;
-        cells += '<td class="fee-td"><div class="fee-cell fee-cell-pend" title="' + names[m-1] + ' ' + year + ': pending — click to record the payment" ' +
+        cells += '<td class="fee-td"' + lpgDrop + '><div class="fee-cell fee-cell-pend" title="' + names[m-1] + ' ' + year + ': pending — click to record the payment" ' +
           'onclick="feesMarkPaid(\'' + feeE(u.unit_id) + '\',' + year + ',' + m + ')">+</div></td>';
       } else {
-        cells += '<td class="fee-td"><div class="fee-cell" style="color:var(--text-muted);opacity:.5" title="' + names[m-1] + ' ' + year + ': no entry — click to record one" ' +
+        cells += '<td class="fee-td"' + lpgDrop + '><div class="fee-cell" style="color:var(--text-muted);opacity:.5" title="' + names[m-1] + ' ' + year + ': no entry — click to record one" ' +
           'onclick="feesMarkPaid(\'' + feeE(u.unit_id) + '\',' + year + ',' + m + ')">+</div></td>';
       }
       if (m === statM) {
@@ -398,7 +418,10 @@ function feesRender() {
     '<div class="stat-card info"><div class="stat-label">Collection Rate</div><div class="stat-value">' + (feesUnits.length ? Math.round(paid / feesUnits.length * 100) : 0) + '%</div><div class="stat-sub">' + names[statM-1] + ' ' + year + '</div></div>';
 
   var ce = document.getElementById('fees-count');
-  if (ce) ce.textContent = shown + ' unit' + (shown !== 1 ? 's' : '');
+  if (ce) ce.innerHTML = shown + ' unit' + (shown !== 1 ? 's' : '') +
+    (feesType === 'LPG'
+      ? ' <span style="color:var(--text-muted);">·</span> <span style="color:var(--accent);font-weight:600;">↔ drag a paid month onto an empty one to move it (Shift/Ctrl-click to grab several)</span>'
+      : '');
 
   var head = '<th>#</th><th class="fee-sticky">Unit / ' + (FEES_TENANT_PAID[feesType] ? 'Tenant' : 'Owner') + '</th>';
   for (var hm = 0; hm < 12; hm++) head += '<th style="text-align:center">' + names[hm] + '</th>';
@@ -489,82 +512,12 @@ function _feesOpenMarkPaidModal(unitId, year, month, def, hint) {
         (hint ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">📟 ' + hint + ' — from LPG Meter Readings</div>' : '') +
       '</div>' +
       '<div class="form-group"><label>Notes (optional)</label><input id="fmp-notes" placeholder="e.g. Cash received on 05-Jul"></div>' +
-      (feesType === 'LPG'
-        ? '<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:10px;">' +
-            '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Or realign months from ' + names[month-1] + ' (only ' + names[month-1] + ' onward &amp; this year move):</div>' +
-            '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-              '<button class="btn btn-xs btn-outline" title="Pull ' + names[month-1] + '’s later months one step left to fill this blank month" onclick="feesShiftLpgFrom(\'' + feeE(unitId) + '\',' + month + ',-1)">⇤ Fill this gap (−1)</button>' +
-              '<button class="btn btn-xs btn-outline" title="Push ' + names[month-1] + ' and everything after it one step right, opening a blank here" onclick="feesShiftLpgFrom(\'' + feeE(unitId) + '\',' + month + ',1)">⇥ Open a gap (+1)</button>' +
-            '</div>' +
-          '</div>'
-        : '') +
       '<div class="form-actions">' +
         '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
         '<button class="btn btn-accent" onclick="feesSubmitMarkPaid(\'' + feeE(unitId) + '\',' + year + ',' + month + ')">💾 Record Payment</button>' +
       '</div>' +
     '</div>'
   );
-}
-
-// Partial "gap" shift launched from a cell popup. −1 fills the clicked (blank)
-// month by pulling the months after it one step left; +1 opens a blank at the
-// clicked month by pushing it and everything after one step right. Year-scoped
-// and boundary-safe, exactly like the row-level whole-year shift.
-function feesShiftLpgFrom(unitId, pivotMonth, offset) {
-  var unit = String(unitId).toUpperCase();
-  var vYear = Number(document.getElementById('fee-f-year').value || (new Date()).getFullYear());
-  var pm = Number(pivotMonth);
-  var mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  // −1 moves months after the pivot (fill the pivot); +1 moves the pivot and after.
-  var fromMonth = offset < 0 ? pm + 1 : pm;
-
-  // A −1 fill must not land on top of an existing payment at the pivot month.
-  if (offset < 0) {
-    for (var j = 0; j < paysAll.length; j++) {
-      var q = paysAll[j];
-      if (String(q.unit_id).toUpperCase() !== unit || q.payment_type !== 'LPG') continue;
-      if (q.status !== 'Verified' && q.status !== 'Pending') continue;
-      var qm = String(q.month).match(/^(\d{4})-(\d{1,2})/);
-      if (qm && Number(qm[1]) === vYear && Number(qm[2]) === pm) {
-        showToast(mn[pm] + ' ' + vYear + ' already has a payment — filling would overwrite it. Use “Open a gap” (+1) instead.', 'error');
-        return;
-      }
-    }
-  }
-
-  var inYear = 0, boundary = 0;
-  for (var i = 0; i < paysAll.length; i++) {
-    var p = paysAll[i];
-    if (String(p.unit_id).toUpperCase() !== unit || p.payment_type !== 'LPG') continue;
-    if (p.status !== 'Verified' && p.status !== 'Pending') continue;
-    var mm = String(p.month).match(/^(\d{4})-(\d{1,2})/);
-    if (!mm || Number(mm[1]) !== vYear) continue;
-    var m = Number(mm[2]);
-    if (m < fromMonth) continue;
-    var nm = m + offset;
-    if (nm < 1 || nm > 12) boundary++; else inYear++;
-  }
-  if (!inYear && !boundary) { showToast('Nothing to shift after ' + mn[pm] + ' ' + vYear, 'info'); return; }
-  if (!inYear) { showToast('Only a year-boundary month would move — fix it via ✏️ Edit', 'info'); return; }
-
-  var act = offset < 0
-    ? ('fill the ' + mn[pm] + ' gap — pull ' + (pm < 12 ? mn[pm+1] : 'later') + '+ one month left')
-    : ('open a gap at ' + mn[pm] + ' — push ' + mn[pm] + '+ one month right');
-  var ok = confirm('Shift ' + inYear + ' LPG payment(s) for ' + unit + ' in ' + vYear + ' to ' + act + '?\n\n' +
-    'Only ' + mn[fromMonth] + ' onward moves; earlier months and ' + (vYear - 1) + '/' + (vYear + 1) + ' stay untouched.\n' +
-    (boundary ? boundary + ' payment(s) at the year boundary left as-is (fix via ✏️ Edit).\n' : '') +
-    '\nAmounts and bank dates are unchanged; UO markers stay put.\n\nContinue?');
-  if (!ok) return;
-  closeModalForce();
-  doPostWithHistoryConfirm('payments.shiftMonths',
-    { unit_id: unit, payment_type: 'LPG', offset: offset, year: vYear, from_month: fromMonth },
-    function(r) {
-      if (r && r.success) {
-        showToast('Shifted ' + (r.data ? r.data.changed : inYear) + ' LPG payment(s) for ' + unit + ' in ' + vYear, 'success');
-        loadPayments();
-      } else showToast((r && r.error) || 'Shift failed', 'error');
-    },
-    function(e) { showToast('Error: ' + e, 'error'); });
 }
 
 function feesSubmitMarkPaid(unitId, year, month) {
@@ -650,13 +603,103 @@ function feesShowCellRecords(unitId, year, month) {
     '</div>';
   });
   h += '<div style="font-size:11.5px;color:var(--text-muted);">The grid shows the SUM of all non-Rejected records here. Residuals from the old split/redistribution tools carry the ⚠️-orange origins — deleting them (with the button above) reconciles the cell.</div>' +
-    (feesType === 'LPG'
-      ? '<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;font-size:11px;color:var(--text-muted);">Month misaligned? ' +
-          '<button class="btn btn-xs btn-outline" style="margin-left:6px;" title="Push ' + names[month-1] + ' and everything after it one month right, opening a blank here" onclick="feesShiftLpgFrom(\'' + feeE(unit) + '\',' + month + ',1)">⇥ Open a gap here (+1)</button>' +
-        '</div>'
-      : '') +
     '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Close</button></div></div>';
   openModal(h);
+}
+
+// ═══ Drag-and-drop month redistribution (LPG) ═══════════════════════
+// Grab a paid month-cell and drop it on an empty month to move that payment
+// there; Shift/Ctrl-click builds a multi-cell selection that moves together.
+// Everything stays inside the unit's row and the viewed year, and a drop is
+// only allowed onto empty months — so a move never overwrites anything and is
+// undone by simply dragging back.
+var lpgSelUnit = null;   // unit whose cells are selected
+var lpgSel     = {};     // month -> true (selected month-cells)
+var lpgDragMon = null;   // the month grabbed at drag start
+
+function _lpgCellEl(unit, mon) {
+  return document.querySelector('.fee-cell[data-lpgcell="' + unit + '|' + mon + '"]');
+}
+function _lpgClearSel() {
+  for (var mo in lpgSel) { var el = _lpgCellEl(lpgSelUnit, mo); if (el) el.classList.remove('lpg-sel'); }
+  lpgSelUnit = null; lpgSel = {};
+}
+function _lpgOccupied(unit, yr) {
+  var occ = {};
+  for (var i = 0; i < paysAll.length; i++) {
+    var p = paysAll[i];
+    if (String(p.unit_id).toUpperCase() !== String(unit).toUpperCase() || p.payment_type !== 'LPG') continue;
+    if (p.status !== 'Verified' && p.status !== 'Pending') continue;
+    var mm = String(p.month).match(/^(\d{4})-(\d{1,2})/);
+    if (mm && Number(mm[1]) === yr) occ[Number(mm[2])] = true;
+  }
+  return occ;
+}
+function feesLpgCellClick(ev, unit, year, mon, isPaid) {
+  // Shift/Ctrl-click toggles a cell in the multi-select instead of opening it.
+  if (ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey)) {
+    ev.preventDefault(); if (ev.stopPropagation) ev.stopPropagation();
+    if (!isPaid) return;
+    if (lpgSelUnit && lpgSelUnit !== unit) _lpgClearSel();
+    lpgSelUnit = unit;
+    var el = _lpgCellEl(unit, mon);
+    if (lpgSel[mon]) { delete lpgSel[mon]; if (el) el.classList.remove('lpg-sel'); }
+    else { lpgSel[mon] = true; if (el) el.classList.add('lpg-sel'); }
+    return;
+  }
+  _lpgClearSel();
+  feesShowCellRecords(unit, year, mon);
+}
+function feesLpgDragStart(ev, unit, mon) {
+  // Dragging a cell that isn't part of the current selection makes it the
+  // sole selection; dragging a selected cell moves the whole selection.
+  if (!(lpgSelUnit === unit && lpgSel[mon])) {
+    _lpgClearSel();
+    lpgSelUnit = unit; lpgSel[mon] = true;
+    var el = _lpgCellEl(unit, mon); if (el) el.classList.add('lpg-sel');
+  }
+  lpgDragMon = mon;
+  if (ev.dataTransfer) { ev.dataTransfer.effectAllowed = 'move'; try { ev.dataTransfer.setData('text/plain', unit + '|' + mon); } catch (e) {} }
+}
+function _lpgValid(offset) {
+  if (!offset || !lpgSelUnit) return false;
+  var vYear = Number(document.getElementById('fee-f-year').value || (new Date()).getFullYear());
+  var occ = _lpgOccupied(lpgSelUnit, vYear);
+  for (var mo in lpgSel) {
+    var s = Number(mo), t = s + offset;
+    if (t < 1 || t > 12) return false;                 // outside the year
+    if (occ[t] && !lpgSel[t]) return false;            // occupied by a non-selected month
+  }
+  return true;
+}
+function feesLpgOver(ev, mon) {
+  if (lpgDragMon == null) return;
+  ev.preventDefault();
+  var offset = mon - lpgDragMon;
+  var ok = offset !== 0 && _lpgValid(offset);
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = ok ? 'move' : 'none';
+  var td = ev.currentTarget;
+  td.classList.remove('drop-ok', 'drop-bad');
+  if (offset !== 0) td.classList.add(ok ? 'drop-ok' : 'drop-bad');
+}
+function feesLpgLeave(ev) { ev.currentTarget.classList.remove('drop-ok', 'drop-bad'); }
+function feesLpgDrop(ev, unit, mon) {
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drop-ok', 'drop-bad');
+  var grab = lpgDragMon; lpgDragMon = null;
+  if (grab == null || lpgSelUnit !== unit) return;
+  var offset = mon - grab;
+  if (!offset) return;
+  if (!_lpgValid(offset)) { showToast('Can’t drop there — a month is occupied or outside the year', 'error'); return; }
+  var vYear = Number(document.getElementById('fee-f-year').value || (new Date()).getFullYear());
+  var months = Object.keys(lpgSel).map(Number);
+  doPostWithHistoryConfirm('payments.moveCells',
+    { unit_id: unit, payment_type: 'LPG', year: vYear, source_months: months, offset: offset },
+    function(r) {
+      if (r && r.success) { showToast('Moved ' + months.length + ' month(s) for ' + unit + ' in ' + vYear, 'success'); _lpgClearSel(); loadPayments(); }
+      else showToast((r && r.error) || 'Move failed', 'error');
+    },
+    function(e) { showToast('Error: ' + e, 'error'); });
 }
 
 function feesDeleteRecord(paymentId) {

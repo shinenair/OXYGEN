@@ -199,6 +199,61 @@ var PaymentsService = (function() {
     return { success: true, changed: changed, skippedBoundary: skippedBoundary, details: details };
   }
 
+  // Drag-and-drop redistribution: move a set of month-cells for one unit+type
+  // by a uniform offset, all within the same year. Every real payment in each
+  // source month moves to (month + offset). Blocks the whole move if any target
+  // would land outside the year or on a month that already has a payment and
+  // isn't itself being vacated — so a move is always non-destructive (nothing
+  // is ever overwritten). UO / Rejected rows are left alone.
+  function moveUnitCells(unitId, paymentType, year, sourceMonths, offset) {
+    var unit = String(unitId || '').toUpperCase();
+    var off  = Number(offset) || 0;
+    var yr   = Number(year) || 0;
+    if (!unit || !paymentType || !yr) throw new Error('Unit, type and year are required.');
+    if (!off) return { success: true, changed: 0 };
+    var srcSet = {};
+    (sourceMonths || []).forEach(function(m) { var n = Number(m); if (n >= 1 && n <= 12) srcSet[n] = true; });
+    var srcList = Object.keys(srcSet).map(Number);
+    if (!srcList.length) return { success: true, changed: 0 };
+
+    var sheet = Database.getSheet(SHEET);
+    var rows  = Database.getAll(SHEET);
+
+    // Occupied months (real payments) for this unit/type/year.
+    var occupied = {};
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][C.UNIT_ID]).toUpperCase() !== unit) continue;
+      if (String(rows[i][C.PAYMENT_TYPE]) !== paymentType) continue;
+      var st = String(rows[i][C.STATUS]);
+      if (st !== 'Verified' && st !== 'Pending') continue;
+      var mk = _normMonth(rows[i][C.MONTH]); if (!mk) continue;
+      var pp = mk.split('-'); if (Number(pp[0]) !== yr) continue;
+      occupied[Number(pp[1])] = true;
+    }
+    // Validate every target before writing anything.
+    for (var s = 0; s < srcList.length; s++) {
+      var t = srcList[s] + off;
+      if (t < 1 || t > 12) throw new Error('That move would go outside the year.');
+      if (occupied[t] && !srcSet[t]) throw new Error('Month ' + t + ' already has a payment — can only move onto empty months.');
+    }
+    // Apply.
+    var changed = 0;
+    for (var i2 = 0; i2 < rows.length; i2++) {
+      if (String(rows[i2][C.UNIT_ID]).toUpperCase() !== unit) continue;
+      if (String(rows[i2][C.PAYMENT_TYPE]) !== paymentType) continue;
+      var st2 = String(rows[i2][C.STATUS]);
+      if (st2 !== 'Verified' && st2 !== 'Pending') continue;
+      var mk2 = _normMonth(rows[i2][C.MONTH]); if (!mk2) continue;
+      var pp2 = mk2.split('-'); if (Number(pp2[0]) !== yr) continue;
+      var m2 = Number(pp2[1]);
+      if (!srcSet[m2]) continue;
+      sheet.getRange(i2 + 2, C.MONTH + 1).setValue("'" + _mk(yr, m2 + off));
+      changed++;
+    }
+    if (changed) SpreadsheetApp.flush();
+    return { success: true, changed: changed };
+  }
+
   function getAllPayments(filters) {
     var rows = Database.getAll(SHEET);
     var payments = rows.map(function(r) { return _toObj(r); });
@@ -490,6 +545,7 @@ var PaymentsService = (function() {
     getMonthSummary:            getMonthSummary,
     deleteByMonth:              deleteByMonth,
     shiftUnitMonths:            shiftUnitMonths,
+    moveUnitCells:              moveUnitCells,
     allocateFromBankBatch:      allocateFromBankBatch
   };
 })();
