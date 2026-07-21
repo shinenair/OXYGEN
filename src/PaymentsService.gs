@@ -157,10 +157,15 @@ var PaymentsService = (function() {
   // Rejected rows are left in place (they're tied to the actual month, not a
   // payment). Amounts, bank references and dates are untouched — only the
   // month a payment is recorded FOR moves. Returns a from→to echo per row.
-  function shiftUnitMonths(unitId, paymentType, offset, year) {
+  function shiftUnitMonths(unitId, paymentType, offset, year, fromMonth) {
     var unit = String(unitId || '').toUpperCase();
     var off  = Number(offset) || 0;
     var yr   = Number(year) || 0;   // 0 = no year filter (legacy callers)
+    // Only records from this month onward move — 1 = the whole year (the row
+    // buttons), or a pivot month for a partial "fill/open a gap" shift. Months
+    // to the LEFT of the pivot are never touched.
+    var fromM = Number(fromMonth) || 1;
+    if (fromM < 1) fromM = 1; if (fromM > 12) fromM = 12;
     if (!unit || !paymentType) throw new Error('Unit and payment type are required.');
     if (!off) return { success: true, changed: 0, skippedBoundary: 0, details: [] };
     var sheet = Database.getSheet(SHEET);
@@ -178,6 +183,8 @@ var PaymentsService = (function() {
       // Year scope: only touch records in the active/viewed year, so shifting
       // 2024 never affects 2023 or 2025.
       if (yr && recY !== yr) continue;
+      // Pivot: leave every month to the left of the pivot alone.
+      if (recM < fromM) continue;
       var newM = recM + off;
       // Stay inside the SAME year — a shift that would cross the year boundary
       // (Jan → prev Dec, or Dec → next Jan) is intentionally left as-is so the

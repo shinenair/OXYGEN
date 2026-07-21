@@ -489,12 +489,82 @@ function _feesOpenMarkPaidModal(unitId, year, month, def, hint) {
         (hint ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">📟 ' + hint + ' — from LPG Meter Readings</div>' : '') +
       '</div>' +
       '<div class="form-group"><label>Notes (optional)</label><input id="fmp-notes" placeholder="e.g. Cash received on 05-Jul"></div>' +
+      (feesType === 'LPG'
+        ? '<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:10px;">' +
+            '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Or realign months from ' + names[month-1] + ' (only ' + names[month-1] + ' onward &amp; this year move):</div>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+              '<button class="btn btn-xs btn-outline" title="Pull ' + names[month-1] + '’s later months one step left to fill this blank month" onclick="feesShiftLpgFrom(\'' + feeE(unitId) + '\',' + month + ',-1)">⇤ Fill this gap (−1)</button>' +
+              '<button class="btn btn-xs btn-outline" title="Push ' + names[month-1] + ' and everything after it one step right, opening a blank here" onclick="feesShiftLpgFrom(\'' + feeE(unitId) + '\',' + month + ',1)">⇥ Open a gap (+1)</button>' +
+            '</div>' +
+          '</div>'
+        : '') +
       '<div class="form-actions">' +
         '<button class="btn btn-outline" onclick="closeModalForce()">Cancel</button>' +
         '<button class="btn btn-accent" onclick="feesSubmitMarkPaid(\'' + feeE(unitId) + '\',' + year + ',' + month + ')">💾 Record Payment</button>' +
       '</div>' +
     '</div>'
   );
+}
+
+// Partial "gap" shift launched from a cell popup. −1 fills the clicked (blank)
+// month by pulling the months after it one step left; +1 opens a blank at the
+// clicked month by pushing it and everything after one step right. Year-scoped
+// and boundary-safe, exactly like the row-level whole-year shift.
+function feesShiftLpgFrom(unitId, pivotMonth, offset) {
+  var unit = String(unitId).toUpperCase();
+  var vYear = Number(document.getElementById('fee-f-year').value || (new Date()).getFullYear());
+  var pm = Number(pivotMonth);
+  var mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  // −1 moves months after the pivot (fill the pivot); +1 moves the pivot and after.
+  var fromMonth = offset < 0 ? pm + 1 : pm;
+
+  // A −1 fill must not land on top of an existing payment at the pivot month.
+  if (offset < 0) {
+    for (var j = 0; j < paysAll.length; j++) {
+      var q = paysAll[j];
+      if (String(q.unit_id).toUpperCase() !== unit || q.payment_type !== 'LPG') continue;
+      if (q.status !== 'Verified' && q.status !== 'Pending') continue;
+      var qm = String(q.month).match(/^(\d{4})-(\d{1,2})/);
+      if (qm && Number(qm[1]) === vYear && Number(qm[2]) === pm) {
+        showToast(mn[pm] + ' ' + vYear + ' already has a payment — filling would overwrite it. Use “Open a gap” (+1) instead.', 'error');
+        return;
+      }
+    }
+  }
+
+  var inYear = 0, boundary = 0;
+  for (var i = 0; i < paysAll.length; i++) {
+    var p = paysAll[i];
+    if (String(p.unit_id).toUpperCase() !== unit || p.payment_type !== 'LPG') continue;
+    if (p.status !== 'Verified' && p.status !== 'Pending') continue;
+    var mm = String(p.month).match(/^(\d{4})-(\d{1,2})/);
+    if (!mm || Number(mm[1]) !== vYear) continue;
+    var m = Number(mm[2]);
+    if (m < fromMonth) continue;
+    var nm = m + offset;
+    if (nm < 1 || nm > 12) boundary++; else inYear++;
+  }
+  if (!inYear && !boundary) { showToast('Nothing to shift after ' + mn[pm] + ' ' + vYear, 'info'); return; }
+  if (!inYear) { showToast('Only a year-boundary month would move — fix it via ✏️ Edit', 'info'); return; }
+
+  var act = offset < 0
+    ? ('fill the ' + mn[pm] + ' gap — pull ' + (pm < 12 ? mn[pm+1] : 'later') + '+ one month left')
+    : ('open a gap at ' + mn[pm] + ' — push ' + mn[pm] + '+ one month right');
+  var ok = confirm('Shift ' + inYear + ' LPG payment(s) for ' + unit + ' in ' + vYear + ' to ' + act + '?\n\n' +
+    'Only ' + mn[fromMonth] + ' onward moves; earlier months and ' + (vYear - 1) + '/' + (vYear + 1) + ' stay untouched.\n' +
+    (boundary ? boundary + ' payment(s) at the year boundary left as-is (fix via ✏️ Edit).\n' : '') +
+    '\nAmounts and bank dates are unchanged; UO markers stay put.\n\nContinue?');
+  if (!ok) return;
+  closeModalForce();
+  doPostWithHistoryConfirm('payments.shiftMonths',
+    { unit_id: unit, payment_type: 'LPG', offset: offset, year: vYear, from_month: fromMonth },
+    function(r) {
+      if (r && r.success) {
+        showToast('Shifted ' + (r.data ? r.data.changed : inYear) + ' LPG payment(s) for ' + unit + ' in ' + vYear, 'success');
+        loadPayments();
+      } else showToast((r && r.error) || 'Shift failed', 'error');
+    },
+    function(e) { showToast('Error: ' + e, 'error'); });
 }
 
 function feesSubmitMarkPaid(unitId, year, month) {
@@ -580,6 +650,11 @@ function feesShowCellRecords(unitId, year, month) {
     '</div>';
   });
   h += '<div style="font-size:11.5px;color:var(--text-muted);">The grid shows the SUM of all non-Rejected records here. Residuals from the old split/redistribution tools carry the ⚠️-orange origins — deleting them (with the button above) reconciles the cell.</div>' +
+    (feesType === 'LPG'
+      ? '<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;font-size:11px;color:var(--text-muted);">Month misaligned? ' +
+          '<button class="btn btn-xs btn-outline" style="margin-left:6px;" title="Push ' + names[month-1] + ' and everything after it one month right, opening a blank here" onclick="feesShiftLpgFrom(\'' + feeE(unit) + '\',' + month + ',1)">⇥ Open a gap here (+1)</button>' +
+        '</div>'
+      : '') +
     '<div class="form-actions"><button class="btn btn-outline" onclick="closeModalForce()">Close</button></div></div>';
   openModal(h);
 }

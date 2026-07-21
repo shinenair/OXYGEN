@@ -295,7 +295,7 @@ var ApiRouter = (function() {
       case 'payments.getMonthlyHistory': return PaymentsService.getMonthlyPaymentHistory(data.unit_id);
       case 'payments.getStats':       return PaymentsService.getPaymentStats();
       case 'payments.bankDate':       return _resolveBankDate(data.txn_id);
-      case 'payments.shiftMonths':    return PaymentsService.shiftUnitMonths(data.unit_id, data.payment_type, data.offset, data.year);
+      case 'payments.shiftMonths':    return PaymentsService.shiftUnitMonths(data.unit_id, data.payment_type, data.offset, data.year, data.from_month);
 
       // Export
       case 'export.units':         return ExportService.exportUnitsReport();
