@@ -117,6 +117,107 @@ var SettingsService = (function() {
     return { success: true, active_year: y };
   }
 
+  // ── Effective-dated Fee Schedule ──────────────────────────────
+  // Some fees change over time (Maintenance was ₹1,500 up to Feb 2025, then
+  // ₹2,000 from Mar 2025). This is the same idea as LPG Rate History: each
+  // entry says "from this month onward the fee is ₹X", and feeForMonth()
+  // returns the amount that was in force for any given month — so past months
+  // keep their old amount and never get retro-changed by a new rate.
+  var FEE_SHEET = 'FeeSchedule';
+  // Columns: schedule_id | fee_type | year | month | amount | set_by | updated_at
+  var FS = { ID: 0, TYPE: 1, YEAR: 2, MONTH: 3, AMOUNT: 4, SET_BY: 5, UPDATED: 6 };
+
+  function ensureFeeScheduleSheet() {
+    var ss    = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(FEE_SHEET);
+    if (sheet) return sheet;
+    sheet = ss.insertSheet(FEE_SHEET);
+    sheet.appendRow(['schedule_id','fee_type','year','month','amount','set_by','updated_at']);
+    sheet.getRange(1, 1, 1, 7)
+      .setFontWeight('bold').setBackground('#0f2744').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+    // Seed the known Maintenance history the first time the sheet is created:
+    // ₹1,500 from the start, ₹2,000 from Mar 2025 onward.
+    var now = new Date().toISOString();
+    sheet.appendRow([Database.generateId('FSC'), 'Maintenance', 2020, 1, 1500, 'System', now]);
+    sheet.appendRow([Database.generateId('FSC'), 'Maintenance', 2025, 3, 2000, 'System', now]);
+    return sheet;
+  }
+
+  function listFeeSchedule(feeType) {
+    ensureFeeScheduleSheet();
+    var rows = Database.getAll(FEE_SHEET);
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      if (feeType && String(rows[i][FS.TYPE]) !== feeType) continue;
+      out.push({
+        schedule_id: String(rows[i][FS.ID]),
+        fee_type:    String(rows[i][FS.TYPE]),
+        year:        Number(rows[i][FS.YEAR]),
+        month:       Number(rows[i][FS.MONTH]),
+        amount:      Number(rows[i][FS.AMOUNT]),
+        set_by:      String(rows[i][FS.SET_BY] || '')
+      });
+    }
+    out.sort(function(a, b) { return (a.year * 12 + a.month) - (b.year * 12 + b.month); });
+    return out;
+  }
+
+  // Upsert one "from this month, fee = amount" entry for a fee type.
+  function setFeeSchedule(data) {
+    var type = String(data.fee_type || '').trim();
+    var year = Number(data.year), month = Number(data.month), amount = Number(data.amount);
+    if (!type) throw new Error('Fee type is required.');
+    if (!year || !month || month < 1 || month > 12) throw new Error('Valid year and month are required.');
+    if (isNaN(amount) || amount < 0) throw new Error('Valid amount is required.');
+    var sheet = ensureFeeScheduleSheet();
+    var rows = Database.getAll(FEE_SHEET);
+    var now = new Date().toISOString();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][FS.TYPE]) === type && Number(rows[i][FS.YEAR]) === year && Number(rows[i][FS.MONTH]) === month) {
+        sheet.getRange(i + 2, FS.AMOUNT + 1).setValue(amount);
+        sheet.getRange(i + 2, FS.SET_BY + 1).setValue(data.set_by || 'Manager');
+        sheet.getRange(i + 2, FS.UPDATED + 1).setValue(now);
+        return { success: true, updated: true };
+      }
+    }
+    sheet.appendRow([Database.generateId('FSC'), type, year, month, amount, data.set_by || 'Manager', now]);
+    return { success: true, created: true };
+  }
+
+  function deleteFeeSchedule(scheduleId) {
+    var sheet = ensureFeeScheduleSheet();
+    var rows = Database.getAll(FEE_SHEET);
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][FS.ID]) === String(scheduleId)) { sheet.deleteRow(i + 2); return { success: true }; }
+    }
+    throw new Error('Schedule entry not found.');
+  }
+
+  // The fee amount in force for a fee type in a given 'YYYY-MM'. Picks the
+  // entry with the latest effective-from that is still on or before the
+  // target month. Falls back to the current fee_<type> setting, then 0.
+  function feeForMonth(feeType, monthKey) {
+    var m = String(monthKey || '').match(/^(\d{4})-(\d{1,2})/);
+    var targetY = m ? Number(m[1]) : (new Date()).getFullYear();
+    var targetM = m ? Number(m[2]) : ((new Date()).getMonth() + 1);
+    var target = targetY * 12 + targetM;
+    var list = listFeeSchedule(feeType);
+    var best = null, bestKey = -1;
+    for (var i = 0; i < list.length; i++) {
+      var key = list[i].year * 12 + list[i].month;
+      if (key <= target && key > bestKey) { bestKey = key; best = list[i].amount; }
+    }
+    if (best !== null) return best;
+    // No schedule entry on/before the target month — fall back to the plain
+    // current-fee setting for that type, if there is one.
+    var fallbackKey = feeType === 'Maintenance' ? 'fee_maintenance'
+                    : feeType === 'Waste Management' ? 'fee_waste'
+                    : feeType === 'Caution Deposit' ? 'fee_caution_deposit' : '';
+    var fv = fallbackKey ? Number(get(fallbackKey)) : 0;
+    return isNaN(fv) ? 0 : fv;
+  }
+
   function set(key, value) {
     ensureSheet();
     var result = Database.findByColumn(SHEET, 0, key);
@@ -163,6 +264,10 @@ var SettingsService = (function() {
     getActiveYear:   getActiveYear,
     setActiveYear:   setActiveYear,
     saveAll:         saveAll,
-    getAllWithSchema: getAllWithSchema
+    getAllWithSchema: getAllWithSchema,
+    listFeeSchedule:  listFeeSchedule,
+    setFeeSchedule:   setFeeSchedule,
+    deleteFeeSchedule: deleteFeeSchedule,
+    feeForMonth:      feeForMonth
   };
 })();

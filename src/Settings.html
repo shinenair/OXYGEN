@@ -322,6 +322,30 @@ function settingsRender(schema) {
     '<div id="lr-list"><div class="loading"><div class="spinner"></div></div></div>'+
     '</div>';
 
+  // Fee Schedule — effective-dated fee amounts (e.g. Maintenance was ₹1,500
+  // up to Feb 2025, then ₹2,000 from Mar 2025). Each entry is "from this
+  // month onward, the fee is ₹X"; past months keep their old amount.
+  html += '<div class="settings-group collapsed" id="sg-feesched">'+
+    '<div class="settings-group-head" onclick="settingsToggleGroup(this)"><span style="display:flex;align-items:center;"><div class="settings-group-icon">📅</div>Fee Schedule (amount by month)</span><span class="settings-toggle-chevron">+</span></div>'+
+    '<div style="font-size:12px;color:var(--text-muted);padding:0 4px 10px;">Set a fee amount effective from a given month onward — e.g. Maintenance was ₹1,500 up to Feb 2025, then ₹2,000 from Mar 2025. When you record a payment, the amount for that month is taken from here. Changing a rate never alters past months.</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'+
+      '<select id="fs-type" style="padding:8px 10px;font-size:13px;">'+
+        '<option value="Maintenance">Maintenance</option>'+
+        '<option value="Waste Management">Waste Management</option>'+
+      '</select>'+
+      '<span style="font-size:12px;color:var(--text-muted);">from</span>'+
+      '<select id="fs-year" style="padding:8px 10px;font-size:13px;"></select>'+
+      '<select id="fs-month" style="padding:8px 10px;font-size:13px;">'+
+        '<option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option><option value="4">Apr</option>'+
+        '<option value="5">May</option><option value="6">Jun</option><option value="7">Jul</option><option value="8">Aug</option>'+
+        '<option value="9">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>'+
+      '</select>'+
+      '<input id="fs-amount" type="number" step="1" placeholder="Amount (₹)" style="width:130px;padding:8px 10px;font-size:13px;">'+
+      '<button class="btn btn-accent btn-sm" onclick="fsSet()">+ Set Fee</button>'+
+    '</div>'+
+    '<div id="fs-list"><div class="loading"><div class="spinner"></div></div></div>'+
+    '</div>';
+
   // Expense Category Auto-Match Patterns — recurring monthly payments
   // (security, housekeeping, a specific vendor) often share a recognizable
   // piece of text in their bank narration every time. Define that text
@@ -413,6 +437,7 @@ function settingsRender(schema) {
   document.getElementById('settings-content').innerHTML = html;
   uaLoad();
   lrLoad();
+  fsLoad();
   epLoad();
   ayLoad();
   dzLoadAllMonthTables();
@@ -519,6 +544,54 @@ function lrDelete(rateId) {
     if (r && r.success) { showToast('Removed', 'success'); lrLoad(); }
     else showToast((r && r.error) || 'Failed', 'error');
   }).doPost_internal('lpg.deleteRate', { rate_id: rateId });
+}
+
+// ── Fee Schedule (effective-dated fee amounts) ──────────────────
+function fsLoad() {
+  var now = new Date();
+  var ySel = document.getElementById('fs-year');
+  if (ySel && !ySel.options.length) {
+    var years = []; for (var y = now.getFullYear() + 1; y >= 2020; y--) years.push(y);
+    ySel.innerHTML = years.map(function(y){ return '<option value="'+y+'">'+y+'</option>'; }).join('');
+    ySel.value = String(now.getFullYear());
+    document.getElementById('fs-month').value = String(now.getMonth() + 1);
+  }
+  google.script.run.withSuccessHandler(function(r) {
+    var list = (r && r.success && r.data) ? r.data : [];
+    var el = document.getElementById('fs-list');
+    if (!el) return;
+    var mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    if (!list.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No fee schedule set yet.</div>'; return; }
+    var h = '<div class="table-wrap"><table><thead><tr><th>Fee</th><th>Effective From</th><th style="text-align:right">Amount (₹)</th><th>Set By</th><th>Action</th></tr></thead><tbody>';
+    for (var i = list.length - 1; i >= 0; i--) {
+      var r2 = list[i];
+      h += '<tr><td style="font-weight:700">' + settingsEsc(r2.fee_type) + '</td>' +
+        '<td>' + mn[r2.month] + ' ' + r2.year + '</td>' +
+        '<td style="text-align:right;font-weight:700">₹' + Math.round(r2.amount).toLocaleString('en-IN') + '</td>' +
+        '<td style="font-size:11px;color:var(--text-muted)">' + settingsEsc(r2.set_by || '—') + '</td>' +
+        '<td><button class="btn btn-xs btn-outline" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg)" onclick="fsDelete(\'' + settingsEsc(r2.schedule_id) + '\')">Remove</button></td></tr>';
+    }
+    el.innerHTML = h + '</tbody></table></div>';
+  }).doPost_internal('fees.listSchedule', {});
+}
+function fsSet() {
+  var type = (document.getElementById('fs-type') || {}).value;
+  var year = (document.getElementById('fs-year') || {}).value;
+  var month = (document.getElementById('fs-month') || {}).value;
+  var amount = (document.getElementById('fs-amount') || {}).value;
+  if (amount === '' || isNaN(Number(amount)) || Number(amount) < 0) { showToast('Enter a valid amount', 'error'); return; }
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Fee saved', 'success'); document.getElementById('fs-amount').value=''; fsLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).withFailureHandler(function(e){ showToast('Error: ' + e, 'error'); })
+    .doPost_internal('fees.setSchedule', { fee_type: type, year: year, month: month, amount: amount, set_by: 'Manager' });
+}
+function fsDelete(scheduleId) {
+  if (!confirm('Remove this fee schedule entry?')) return;
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success) { showToast('Removed', 'success'); fsLoad(); }
+    else showToast((r && r.error) || 'Failed', 'error');
+  }).doPost_internal('fees.deleteSchedule', { schedule_id: scheduleId });
 }
 
 // ── Expense Category Auto-Match Patterns ───────────────────────

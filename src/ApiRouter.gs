@@ -193,6 +193,7 @@ var ApiRouter = (function() {
     'committee.archive': 1, 'committee.autoAllocate': 1, 'committee.seed': 1,
     'auth.setPin': 1, 'auth.clearPin': 1, 'occupancy.setStatus': 1, 'occupancy.deleteEntry': 1,
     'settings.getAll': 1, 'settings.get': 1, 'settings.saveAll': 1, 'settings.setActiveYear': 1,
+    'fees.setSchedule': 1, 'fees.deleteSchedule': 1,
     'corpus.getOwed': 1, 'corpus.setOwed': 1, 'corpus.getReceived': 1, 'corpus.addReceivedRow': 1,
     'corpus.updateReceivedRow': 1, 'corpus.deleteReceivedRow': 1, 'corpus.getAllFDs': 1,
     'corpus.addFD': 1, 'corpus.updateFD': 1, 'corpus.deleteFD': 1, 'corpus.addLine': 1, 'corpus.deleteLine': 1, 'lpg.setFlag': 1,
@@ -513,6 +514,10 @@ var ApiRouter = (function() {
       case 'settings.getActiveYear': return SettingsService.getActiveYear();
       case 'settings.setActiveYear': return SettingsService.setActiveYear(data.year);
       case 'settings.saveAll': return SettingsService.saveAll(data);
+      case 'fees.listSchedule':   return SettingsService.listFeeSchedule(data.fee_type || '');
+      case 'fees.setSchedule':    return SettingsService.setFeeSchedule(data);
+      case 'fees.deleteSchedule': return SettingsService.deleteFeeSchedule(data.schedule_id);
+      case 'fees.forMonth':       return { amount: SettingsService.feeForMonth(data.fee_type, data.month) };
 
       // Corpus Fund (Admin-only — every function also self-checks via
       // UsersService.requireAdmin(), independent of this gate below)

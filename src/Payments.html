@@ -458,6 +458,20 @@ function feesMarkPaid(unitId, year, month) {
       .doPost_internal('lpg.getMonth', { year: year, month: month });
     return;
   }
+
+  // Maintenance & Waste amounts change over time — pull the amount that was
+  // in force for THIS month from the Fee Schedule (Settings), so a Mar-2025+
+  // maintenance defaults to ₹2,000 while earlier months default to ₹1,500.
+  if (feesType === 'Maintenance' || feesType === 'Waste Management') {
+    google.script.run.withSuccessHandler(function(r) {
+      var a = (r && r.success && r.data) ? Number(r.data.amount) : NaN;
+      var amt = (isFinite(a) && a > 0) ? String(Math.round(a)) : def;
+      _feesOpenMarkPaidModal(unitId, year, month, amt, '');
+    }).withFailureHandler(function() { _feesOpenMarkPaidModal(unitId, year, month, def, ''); })
+      .doPost_internal('fees.forMonth', { fee_type: feesType, month: feesMonthKey(year, month) });
+    return;
+  }
+
   _feesOpenMarkPaidModal(unitId, year, month, def, '');
 }
 
