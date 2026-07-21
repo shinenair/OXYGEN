@@ -407,7 +407,7 @@ function settingsRender(schema) {
       '<div id="dz-tenants-status" style="margin-top:8px;"></div>') +
 
     dzBlock('sg-danger-wipe', '☢️', 'Wipe Database for a New Facility',
-      'Clears Units, Owners, Tenants, ALL history archives, Payments, Bank Statement, and LPG Readings & Inventory — everything specific to THIS association. Settings, Categories and Users are kept so the app stays configured and nobody is locked out. Download a backup above first.',
+      'Clears EVERY sheet of association data — units, owners, tenants, all history, payments, both bank accounts, LPG readings & inventory, corpus fund, caretaker ledger, committee, year planner, occupancy, and anything else specific to THIS association. Only Settings, Categories and Users are kept, so the app stays configured and nobody is locked out. Download a backup above first.',
       '<button class="btn btn-outline btn-sm" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="dzWipeForNewFacility()">☢️ Wipe Database</button>',
       true) +
 
@@ -978,7 +978,7 @@ function dzRestoreBackup() {
 }
 
 function dzWipeForNewFacility() {
-  var word = prompt('This clears Units, Owners, Tenants, ALL history, Payments, Bank Statement, and LPG data — everything specific to this association. Settings/Categories/Users are kept.\n\nDownload a backup first if you have not already.\n\nType WIPE DATABASE to confirm:');
+  var word = prompt('This clears EVERY sheet of association data — units, owners, tenants, all history, payments, both bank accounts, LPG, corpus fund, caretaker ledger, committee, planner, occupancy and everything else. Only Settings, Categories and Users are kept.\n\nDownload a backup first if you have not already.\n\nType WIPE DATABASE to confirm:');
   if (word !== 'WIPE DATABASE') { showToast('Cancelled', ''); return; }
   if (!confirm('Are you absolutely sure? This cannot be undone without a backup.')) return;
   google.script.run.withSuccessHandler(function(r) {
