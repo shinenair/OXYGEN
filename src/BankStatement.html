@@ -287,11 +287,24 @@ function bankDoImport() {
           return;
         }
         var r = res.data || {};
+        // Diagnostics: show the month distribution of what was imported and a
+        // few sample dates, so a date-order problem is visible at a glance.
+        var diag = '';
+        if (r.monthCounts && Object.keys(r.monthCounts).length) {
+          var keys = Object.keys(r.monthCounts).sort();
+          diag += '<div style="margin-top:6px;font-size:11.5px;color:var(--text-muted);">Imported by month: ' +
+            keys.map(function(k){ return k + ' (' + r.monthCounts[k] + ')'; }).join(' · ') + '</div>';
+        }
+        if (r.sampleDates && r.sampleDates.length) {
+          diag += '<div style="font-size:11.5px;color:var(--text-muted);">Sample dates read: ' +
+            r.sampleDates.slice(0,6).join(', ') + (typeof r.dayFirst !== 'undefined' ? '  ·  day-first: ' + r.dayFirst : '') + '</div>';
+        }
         bankSetStatus(
           '✓ Done! <strong>' + (r.imported||0) + ' new</strong> transactions imported · ' +
           '<strong>' + (r.duplicates||0) + '</strong> duplicates skipped' +
           (r.skippedBad ? ' · ' + r.skippedBad + ' malformed fragments ignored' : '') +
-          (r.paymentsCreated ? ' · <strong>' + r.paymentsCreated + ' payments posted</strong> to the ledger' : '') + '.',
+          (r.paymentsCreated ? ' · <strong>' + r.paymentsCreated + ' payments posted</strong> to the ledger' : '') + '.' +
+          diag,
           'success'
         );
         inp.value = '';

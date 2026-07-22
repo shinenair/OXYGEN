@@ -174,7 +174,7 @@ var ApiRouter = (function() {
   // Actions only Administrators may perform — enforced on the SERVER,
   // so hiding menus in the browser is cosmetic, not the security boundary.
   var ADMIN_ACTIONS = {
-    'admin.getFinancialMonthSummary': 1, 'admin.deleteFinancialMonth': 1,
+    'admin.getFinancialMonthSummary': 1, 'admin.deleteFinancialMonth': 1, 'admin.deleteFinancialYear': 1,
     'users.list': 1, 'users.add': 1, 'users.setRole': 1, 'users.remove': 1,
     'lpg.setRate': 1, 'lpg.deleteRate': 1, 'lpg.importReadings': 1,
     'lpgInv.addInward': 1, 'lpgInv.deleteInward': 1, 'lpgInv.addOutward': 1, 'lpgInv.deleteOutward': 1,
@@ -366,6 +366,7 @@ var ApiRouter = (function() {
       // single-shot "Reset ALL Payment Data").
       case 'admin.getFinancialMonthSummary':  return _financialMonthSummary();
       case 'admin.deleteFinancialMonth':      return _deleteFinancialMonth(data.month);
+      case 'admin.deleteFinancialYear':       return _deleteFinancialYear(data.year);
       case 'admin.getLpgReadingsMonthSummary': return LPGReadingService.getMonthSummary();
       case 'admin.deleteLpgReadingsByMonth':  return LPGReadingService.deleteReadingsByMonth(data.year, data.month);
       case 'admin.getLpgInwardMonthSummary':  return LPGInventoryService.getInwardMonthSummary();
@@ -614,6 +615,26 @@ var ApiRouter = (function() {
       paymentsFromBank: (bank1.paymentsDeleted || 0) + (bank2.paymentsDeleted || 0),
       paymentsManual: pay.deleted || 0
     };
+  }
+
+  // Clears an ENTIRE year of financial data in one call — loops the month
+  // delete across all 12 months (both bank accounts + their posted payments +
+  // any manual payments). Used to reliably wipe a badly-imported year (e.g. a
+  // statement whose dates were scattered across months) before re-importing.
+  function _deleteFinancialYear(year) {
+    var y = Number(year);
+    if (!y || y < 2000 || y > 2100) throw new Error('Enter a valid year.');
+    var t = { bank1: 0, bank2: 0, paymentsFromBank: 0, paymentsManual: 0, monthsCleared: 0 };
+    for (var m = 1; m <= 12; m++) {
+      var mk = y + '-' + (m < 10 ? '0' + m : String(m));
+      try {
+        var res = _deleteFinancialMonth(mk);
+        t.bank1 += res.bank1; t.bank2 += res.bank2;
+        t.paymentsFromBank += res.paymentsFromBank; t.paymentsManual += res.paymentsManual;
+        if (res.bank1 || res.bank2 || res.paymentsFromBank || res.paymentsManual) t.monthsCleared++;
+      } catch (e) {}
+    }
+    return { success: true, year: y, totals: t };
   }
 
   // For every unit, find whichever resident (current OR archived) had a

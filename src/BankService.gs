@@ -188,6 +188,8 @@ function _makeBankService(SHEET, ACCOUNT) {
     var toPost     = [];   // matched credits to post as payments
     var newRows    = [];   // batched sheet rows
     var fees       = _getFees();
+    var monthCounts = {};  // diagnostic: distribution of imported txn months
+    var sampleDates = [];  // diagnostic: first few raw date strings seen
 
     for (var i = headerRowIdx + 1; i < rows.length; i++) {
       var row = rows[i];
@@ -267,6 +269,9 @@ function _makeBankService(SHEET, ACCOUNT) {
 
       existingIds[txnId] = true;
       imported++;
+      if (sampleDates.length < 6) sampleDates.push(dateStr);
+      var _mkey = _txnMonthKey(dateStr, dayFirst);
+      if (_mkey) monthCounts[_mkey] = (monthCounts[_mkey] || 0) + 1;
 
       // Queue matched credits for automatic payment posting.
       // The month is resolved HERE, unambiguously, from the statement date.
@@ -323,7 +328,8 @@ function _makeBankService(SHEET, ACCOUNT) {
 
     return { imported: imported, duplicates: duplicates, skippedBad: skippedBad,
              errors: errors, paymentsCreated: paymentsCreated,
-             total: rows.length - headerRowIdx - 1 };
+             total: rows.length - headerRowIdx - 1,
+             dayFirst: dayFirst, sampleDates: sampleDates, monthCounts: monthCounts };
   }
 
   // ── Narration Parser ─────────────────────────────────────────

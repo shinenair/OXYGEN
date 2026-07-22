@@ -39,58 +39,68 @@ function importBankFile(payload) {
       var file     = DriveApp.createFile(blob);
       var fileId   = file.getId();
 
-      // ── Read the converted sheet's RAW values and fix any date swap ──
-      // Indian statements write dates as DD/MM/YYYY. When Google converts the
-      // .xls it can parse those with a US (MM/DD) locale, swapping day and
-      // month (01/02/2026 = 1 Feb becomes 2 Jan). We read the real cell values
-      // and correct that deterministically (see below), then hand the parser
-      // unambiguous ISO dates. Falls back to the old CSV export if this fails.
-      try {
-        var conv = SpreadsheetApp.openById(fileId);
-        var sh0  = conv.getSheets()[0];
-        var lastR = sh0.getLastRow(), lastC = sh0.getLastColumn();
-        if (lastR < 1 || lastC < 1) throw new Error('empty converted sheet');
-        var grid = sh0.getRange(1, 1, lastR, lastC).getValues();
+      // ── Get a NATIVE Google Sheet, then read RAW cell values ──
+      // The upload may or may not be auto-converted to a Google Sheet. If
+      // opening it as a spreadsheet fails, EXPLICITLY convert the .xls with
+      // the Drive API. Reading the real cell values (not a CSV export) is what
+      // lets us fix the DD/MM date swap deterministically below.
+      var sheetId = null, tempSheetId = null;
+      try { SpreadsheetApp.openById(fileId).getName(); sheetId = fileId; } catch (eOpen) {}
+      if (!sheetId) {
+        try {
+          var converted = Drive.Files.copy(
+            { name: 'CONVERT ' + filename, mimeType: 'application/vnd.google-apps.spreadsheet' },
+            fileId
+          );
+          if (converted && converted.id) { sheetId = converted.id; tempSheetId = converted.id; }
+        } catch (eConv) {}
+      }
 
-        // Locale-independent date fix. When Google converts the .xls, it may
-        // parse the statement's DD/MM/YYYY dates with a MONTH-FIRST (US) locale,
-        // swapping day and month (01/02 = 1 Feb becomes 2 Jan). Detect it: any
-        // converted real Date whose day-of-month is > 12 proves a DAY-FIRST
-        // conversion (leave as-is); if EVERY converted Date has day <= 12, it
-        // was month-first, so swap day and month back. Dates that stayed as
-        // text (day > 12 can't be a US month) are handled day-first downstream.
-        var sawDate = false, dayFirstConv = false;
-        for (var r = 0; r < grid.length; r++) {
-          for (var c = 0; c < grid[r].length; c++) {
-            var cv = grid[r][c];
-            if (cv instanceof Date && !isNaN(cv.getTime())) { sawDate = true; if (cv.getDate() > 12) dayFirstConv = true; }
+      if (sheetId) {
+        try {
+          var conv  = SpreadsheetApp.openById(sheetId);
+          var sh0   = conv.getSheets()[0];
+          var lastR = sh0.getLastRow(), lastC = sh0.getLastColumn();
+          if (lastR >= 1 && lastC >= 1) {
+            var grid = sh0.getRange(1, 1, lastR, lastC).getValues();
+            // Locale-independent date fix. Google may parse the statement's
+            // DD/MM/YYYY dates with a MONTH-FIRST (US) locale, swapping day and
+            // month (01/02 = 1 Feb becomes 2 Jan). Detect it: any converted real
+            // Date whose day-of-month is > 12 proves DAY-FIRST (leave as-is); if
+            // EVERY converted Date has day <= 12 it was month-first, so swap day
+            // and month back. Dates that stayed text (day > 12 can't be a US
+            // month) are handled day-first downstream. Output unambiguous ISO.
+            var sawDate = false, dayFirstConv = false;
+            for (var r = 0; r < grid.length; r++) {
+              for (var c = 0; c < grid[r].length; c++) {
+                var cv = grid[r][c];
+                if (cv instanceof Date && !isNaN(cv.getTime())) { sawDate = true; if (cv.getDate() > 12) dayFirstConv = true; }
+              }
+            }
+            var swap = sawDate && !dayFirstConv;
+            var pad2 = function (n) { return n < 10 ? '0' + n : String(n); };
+            var cellStr = function (v) {
+              if (v instanceof Date && !isNaN(v.getTime())) {
+                var mo = v.getMonth() + 1, dy = v.getDate();
+                if (swap) { var t = mo; mo = dy; dy = t; }
+                return v.getFullYear() + '-' + pad2(mo) + '-' + pad2(dy);
+              }
+              return (v === null || v === undefined) ? '' : String(v);
+            };
+            csvText = grid.map(function (row) { return row.map(function (v) { return _csvQuote(cellStr(v)); }).join(','); }).join('\n');
           }
-        }
-        var swap = sawDate && !dayFirstConv;
-        function _pad2(n) { return n < 10 ? '0' + n : String(n); }
-        function _cellStr(v) {
-          if (v instanceof Date && !isNaN(v.getTime())) {
-            var mo = v.getMonth() + 1, dy = v.getDate();
-            if (swap) { var t = mo; mo = dy; dy = t; }
-            return v.getFullYear() + '-' + _pad2(mo) + '-' + _pad2(dy);   // unambiguous ISO
-          }
-          return (v === null || v === undefined) ? '' : String(v);
-        }
-        csvText = grid.map(function(row) { return row.map(function(v) { return _csvQuote(_cellStr(v)); }).join(','); }).join('\n');
-      } catch (readErr) {
+        } catch (eRead) { csvText = ''; }
+        if (tempSheetId) { try { DriveApp.getFileById(tempSheetId).setTrashed(true); } catch (eTr) {} }
+      }
+
+      if (!csvText) {
+        // Last resort: locale-blind CSV export (may mis-order ambiguous dates).
         var exportUrl = 'https://docs.google.com/spreadsheets/d/' + fileId + '/export?format=csv&sheet=0';
         var token     = ScriptApp.getOAuthToken();
-        var response  = UrlFetchApp.fetch(exportUrl, {
-          headers: { 'Authorization': 'Bearer ' + token },
-          muteHttpExceptions: true
-        });
+        var response  = UrlFetchApp.fetch(exportUrl, { headers: { 'Authorization': 'Bearer ' + token }, muteHttpExceptions: true });
         if (response.getResponseCode() !== 200) {
           try { file.setTrashed(true); } catch (e0) {}
-          return {
-            success: false,
-            error: 'Could not read the statement (HTTP ' + response.getResponseCode() +
-                   '). Please save your bank statement as CSV and try again.'
-          };
+          return { success: false, error: 'Could not read the statement (HTTP ' + response.getResponseCode() + '). Please save your bank statement as CSV and try again.' };
         }
         csvText = response.getContentText();
       }
