@@ -395,7 +395,10 @@ function settingsRender(schema) {
           '<option value="2">IOB LPG account</option>' +
         '</select>' +
         '<button class="btn btn-outline btn-sm" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="dzResetBankData()">🏦 Reset This Account\'s Bank Data</button>' +
-      '</div><div id="dz-bankwipe-status" style="margin-top:8px;"></div>') +
+      '</div>' +
+      '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);">Safe, non-destructive: rewrite every stored bank date to the consistent <strong>DD-Mon-YYYY</strong> format (e.g. 02-Jan-2024) across both accounts. Nothing is deleted; txn IDs are unchanged. ' +
+        '<button class="btn btn-outline btn-sm" style="margin-left:6px;" onclick="dzNormalizeBankDates()">🗓 Normalize Bank Dates</button></div>' +
+      '<div id="dz-bankwipe-status" style="margin-top:8px;"></div>') +
 
     dzBlock('sg-danger-lpgread', '🔥', 'Delete LPG Readings by Month',
       'Removes every meter reading for one month only. Grouped by year, self-extending.',
@@ -836,6 +839,18 @@ function dzDeleteFinancialMonth(monthKey) {
     } else dzShowStatus('dz-financial-months', '❌ ' + ((r && r.error) || 'Failed'), 'error');
   }).withFailureHandler(function(e) { dzShowStatus('dz-financial-months', '❌ Error: ' + e, 'error'); })
     .doPost_internal('admin.deleteFinancialMonth', { month: monthKey });
+}
+
+function dzNormalizeBankDates() {
+  dzShowStatus('dz-bankwipe', '⏳ Normalizing bank dates to DD-Mon-YYYY…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success !== false && r.data) {
+      var m = (r.data.main && r.data.main.updated) || 0;
+      var l = (r.data.lpg && r.data.lpg.updated) || 0;
+      dzShowStatus('dz-bankwipe', '✓ Done — ' + (m + l) + ' date(s) rewritten to DD-Mon-YYYY (Main: ' + m + ', LPG: ' + l + '). Reload to see them.', 'success');
+    } else dzShowStatus('dz-bankwipe', '❌ ' + ((r && r.error) || 'Failed'), 'error');
+  }).withFailureHandler(function(e) { dzShowStatus('dz-bankwipe', '❌ Error: ' + e, 'error'); })
+    .doPost_internal('admin.normalizeBankDates', {});
 }
 
 function dzResetBankData() {

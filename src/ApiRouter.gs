@@ -175,7 +175,7 @@ var ApiRouter = (function() {
   // so hiding menus in the browser is cosmetic, not the security boundary.
   var ADMIN_ACTIONS = {
     'admin.getFinancialMonthSummary': 1, 'admin.deleteFinancialMonth': 1, 'admin.deleteFinancialYear': 1,
-    'admin.resetBankData': 1,
+    'admin.resetBankData': 1, 'admin.normalizeBankDates': 1,
     'users.list': 1, 'users.add': 1, 'users.setRole': 1, 'users.remove': 1,
     'lpg.setRate': 1, 'lpg.deleteRate': 1, 'lpg.importReadings': 1,
     'lpgInv.addInward': 1, 'lpgInv.deleteInward': 1, 'lpgInv.addOutward': 1, 'lpgInv.deleteOutward': 1,
@@ -369,6 +369,7 @@ var ApiRouter = (function() {
       case 'admin.deleteFinancialMonth':      return _deleteFinancialMonth(data.month);
       case 'admin.deleteFinancialYear':       return _deleteFinancialYear(data.year);
       case 'admin.resetBankData':             return (String(data.account) === '2' ? Bank2Service : BankService).resetBankData();
+      case 'admin.normalizeBankDates':        return { main: BankService.normalizeDates(), lpg: Bank2Service.normalizeDates() };
       case 'admin.getLpgReadingsMonthSummary': return LPGReadingService.getMonthSummary();
       case 'admin.deleteLpgReadingsByMonth':  return LPGReadingService.deleteReadingsByMonth(data.year, data.month);
       case 'admin.getLpgInwardMonthSummary':  return LPGInventoryService.getInwardMonthSummary();
