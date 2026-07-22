@@ -216,6 +216,13 @@ function _makeBankService(SHEET, ACCOUNT) {
                       (debit  !== '' && !isNaN(Number(String(debit).replace(/[₹,\s]/g, ''))));
       if (!hasAmount) { skippedBad++; continue; }
 
+      // Store the date UNAMBIGUOUSLY as ISO YYYY-MM-DD. Numeric statement dates
+      // are DD/MM (day-first); left as "01/02/2026" every later new Date()
+      // reader would parse them US-style (MM/DD). Canonicalise once, here, so
+      // display, sorting and month-keys are all correct and consistent.
+      dateStr = _toIsoDate(dateStr, dayFirst);
+      var valDateStr = _toIsoDate(String(row[colValDate] || '').trim(), dayFirst);
+
       // Deterministic ID — includes the running balance so identical-looking
       // transactions on the same day are all kept
       var txnId = _makeId(dateStr, narr, credit || debit, balance);
@@ -246,8 +253,8 @@ function _makeBankService(SHEET, ACCOUNT) {
 
       newRows.push([
         txnId,
-        "'" + dateStr,                                    // text — never re-parsed by Sheets
-        "'" + String(row[colValDate] || '').trim(),
+        "'" + dateStr,                                    // ISO YYYY-MM-DD — unambiguous
+        "'" + valDateStr,
         String(row[colChq]     || '').trim(),
         narr,
         String(row[colCod]     || '').trim(),
@@ -679,6 +686,32 @@ function _makeBankService(SHEET, ACCOUNT) {
     var y = Number(yearStr);
     if (y < 100) y += 2000;
     return y + '-' + (mo < 10 ? '0' + mo : String(mo));
+  }
+
+  function _p2(n) { n = Number(n); return n < 10 ? '0' + n : String(n); }
+
+  // Any statement date -> unambiguous ISO 'YYYY-MM-DD'. Handles ISO,
+  // DD-Mon-YYYY, and numeric DD/MM (or MM/DD, via the caller's dayFirst flag).
+  // Unknown shapes pass through unchanged. This is the single place that turns
+  // an ambiguous "01/02/2026" into "2026-02-01", so nothing downstream ever
+  // has to guess (and no new Date() re-parses it US-style).
+  function _toIsoDate(s, dayFirst) {
+    s = String(s || '').trim();
+    if (!s) return s;
+    var iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (iso) return iso[1] + '-' + _p2(iso[2]) + '-' + _p2(iso[3]);
+    var mnames = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+    var mon = s.toLowerCase().match(/^(\d{1,2})[-\/ ]([a-z]{3})[a-z]*[-\/ ](\d{2,4})/);
+    if (mon && mnames[mon[2]]) { var y1 = Number(mon[3]); if (y1 < 100) y1 += 2000; return y1 + '-' + _p2(mnames[mon[2]]) + '-' + _p2(mon[1]); }
+    var num = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
+    if (num) {
+      var a = Number(num[1]), b = Number(num[2]), y2 = Number(num[3]); if (y2 < 100) y2 += 2000;
+      var day, mo;
+      if (dayFirst) { day = a; mo = b; } else { mo = a; day = b; }
+      if (mo > 12 && day <= 12) { var t = mo; mo = day; day = t; } // impossible month → swap
+      if (mo >= 1 && mo <= 12) return y2 + '-' + _p2(mo) + '-' + _p2(day);
+    }
+    return s; // unknown shape — leave untouched
   }
 
   function _makeId(date, narr, amount, balance) {

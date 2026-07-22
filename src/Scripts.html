@@ -116,6 +116,17 @@
         var dd = parseInt(m[3], 10), mo = parseInt(m[2], 10), yy = m[1];
         if (mo >= 1 && mo <= 12) return (dd < 10 ? '0' + dd : String(dd)) + ' ' + mns[mo - 1] + ' ' + yy;
       }
+      // Numeric DD/MM/YYYY or DD-MM-YYYY — Indian day-first. new Date() would
+      // parse these US-style (MM/DD), turning 01/02/2026 (1 Feb) into 2 Jan, so
+      // handle them explicitly here BEFORE falling back to new Date().
+      var dm = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+      if (dm) {
+        var d2 = parseInt(dm[1], 10), mo2 = parseInt(dm[2], 10), y2 = parseInt(dm[3], 10);
+        if (y2 < 100) y2 += 2000;
+        if (mo2 > 12 && d2 <= 12) { var tmp = mo2; mo2 = d2; d2 = tmp; } // impossible month → swap
+        if (mo2 >= 1 && mo2 <= 12 && d2 >= 1 && d2 <= 31)
+          return (d2 < 10 ? '0' + d2 : String(d2)) + ' ' + mns[mo2 - 1] + ' ' + y2;
+      }
       var d = new Date(s);
       if (isNaN(d)) return s;
       var day = d.getDate();
