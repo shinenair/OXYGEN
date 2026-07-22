@@ -200,6 +200,7 @@ function _makeBankService(SHEET, ACCOUNT) {
       var debit    = String(row[colDebit]  || '').trim();
       var credit   = String(row[colCredit] || '').trim();
       var balance  = String(row[colBal]    || '').trim();
+      if (dateStr && sampleDates.length < 6) sampleDates.push(dateStr);  // diagnostic (all rows, incl. duplicates)
 
       // Only requirement: a date-looking cell and at least one real amount
       // (credit or debit). Narration is deliberately NOT required — real
@@ -269,7 +270,6 @@ function _makeBankService(SHEET, ACCOUNT) {
 
       existingIds[txnId] = true;
       imported++;
-      if (sampleDates.length < 6) sampleDates.push(dateStr);
       var _mkey = _txnMonthKey(dateStr, dayFirst);
       if (_mkey) monthCounts[_mkey] = (monthCounts[_mkey] || 0) + 1;
 

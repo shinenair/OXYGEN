@@ -387,6 +387,16 @@ function settingsRender(schema) {
       '</div>' +
       '<div id="dz-financial-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-financial-months-status" style="margin-top:8px;"></div>') +
 
+    dzBlock('sg-danger-bankwipe', '🏦', 'Reset ALL Bank Statement Data (one account)',
+      'Removes EVERY transaction from one bank account\'s ledger — including any "ghost" rows with odd dates that the per-month tools can\'t see or delete — and the bank-posted payments they created. Manual Fees Received entries and the Dec-2024 benchmark are KEPT (only "BANK:" auto-posted payments are removed). Use this when a bad import left rows you can\'t clear any other way, then re-import that account\'s statements. Does NOT touch the other bank account.',
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+        '<select id="dz-bankwipe-acct" style="padding:7px 10px;font-size:13px;">' +
+          '<option value="1">Main IOB account</option>' +
+          '<option value="2">IOB LPG account</option>' +
+        '</select>' +
+        '<button class="btn btn-outline btn-sm" style="border-color:var(--c-rejected-fg);color:var(--c-rejected-fg);" onclick="dzResetBankData()">🏦 Reset This Account\'s Bank Data</button>' +
+      '</div><div id="dz-bankwipe-status" style="margin-top:8px;"></div>') +
+
     dzBlock('sg-danger-lpgread', '🔥', 'Delete LPG Readings by Month',
       'Removes every meter reading for one month only. Grouped by year, self-extending.',
       '<div id="dz-lpgread-months"><div class="loading"><div class="spinner"></div></div></div><div id="dz-lpgread-months-status" style="margin-top:8px;"></div>') +
@@ -826,6 +836,22 @@ function dzDeleteFinancialMonth(monthKey) {
     } else dzShowStatus('dz-financial-months', '❌ ' + ((r && r.error) || 'Failed'), 'error');
   }).withFailureHandler(function(e) { dzShowStatus('dz-financial-months', '❌ Error: ' + e, 'error'); })
     .doPost_internal('admin.deleteFinancialMonth', { month: monthKey });
+}
+
+function dzResetBankData() {
+  var acct = (document.getElementById('dz-bankwipe-acct') || {}).value || '1';
+  var name = acct === '2' ? 'IOB LPG account' : 'Main IOB account';
+  var word = prompt('This removes EVERY transaction from the ' + name + ' ledger (all years, including invisible "ghost" rows), and the "BANK:" payments they posted.\n\nManual Fees Received entries and the Dec-2024 benchmark are KEPT. The other bank account is untouched.\n\nType RESET BANK to confirm:');
+  if (word !== 'RESET BANK') { dzShowStatus('dz-bankwipe', 'Cancelled — nothing was deleted.', ''); return; }
+  dzShowStatus('dz-bankwipe', '⏳ Clearing ' + name + '…', '');
+  google.script.run.withSuccessHandler(function(r) {
+    if (r && r.success !== false && r.data) {
+      var d = r.data;
+      dzShowStatus('dz-bankwipe', '✓ ' + name + ' cleared — ' + (d.txnsCleared || 0) + ' transaction(s) removed, ' + (d.paymentsRemoved || 0) + ' bank-posted payment(s) removed. You can now re-import this account\'s statements.', 'success');
+      dzLoadFinancialMonthTable();
+    } else dzShowStatus('dz-bankwipe', '❌ ' + ((r && r.error) || 'Failed'), 'error');
+  }).withFailureHandler(function(e) { dzShowStatus('dz-bankwipe', '❌ Error: ' + e, 'error'); })
+    .doPost_internal('admin.resetBankData', { account: acct });
 }
 
 function dzDeleteFinancialYear() {
