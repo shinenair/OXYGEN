@@ -276,6 +276,39 @@ var SettingsService = (function() {
     return result;
   }
 
+  // Google Sheets caps a single spreadsheet at 10,000,000 cells — counted as
+  // the sum of (maxRows * maxColumns) of every tab, NOT just the cells that
+  // hold data. This reports where we stand against that ceiling and which tabs
+  // are the heaviest, so we get early warning long before hitting the wall.
+  function getCellUsage() {
+    var ss     = SpreadsheetApp.getActiveSpreadsheet();
+    var sheets = ss.getSheets();
+    var LIMIT  = 10000000;
+    var total  = 0, list = [];
+    for (var i = 0; i < sheets.length; i++) {
+      var sh   = sheets[i];
+      var rows = sh.getMaxRows();
+      var cols = sh.getMaxColumns();
+      var cells = rows * cols;
+      total += cells;
+      list.push({
+        name:     sh.getName(),
+        rows:     rows,
+        cols:     cols,
+        cells:    cells,
+        dataRows: Math.max(0, sh.getLastRow() - 1)
+      });
+    }
+    list.sort(function (a, b) { return b.cells - a.cells; });
+    return {
+      limit:      LIMIT,
+      total:      total,
+      percent:    Math.round(total / LIMIT * 10000) / 100,
+      sheetCount: sheets.length,
+      sheets:     list
+    };
+  }
+
   return {
     ensureSheet:     ensureSheet,
     getAll:          getAll,
@@ -289,6 +322,7 @@ var SettingsService = (function() {
     setFeeSchedule:   setFeeSchedule,
     deleteFeeSchedule: deleteFeeSchedule,
     feeForMonth:      feeForMonth,
-    feeAmountsForType: feeAmountsForType
+    feeAmountsForType: feeAmountsForType,
+    getCellUsage:     getCellUsage
   };
 })();

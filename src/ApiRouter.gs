@@ -521,6 +521,7 @@ var ApiRouter = (function() {
       case 'settings.getActiveYear': return SettingsService.getActiveYear();
       case 'settings.setActiveYear': return SettingsService.setActiveYear(data.year);
       case 'settings.saveAll': return SettingsService.saveAll(data);
+      case 'settings.cellUsage': return SettingsService.getCellUsage();
       case 'fees.listSchedule':   return SettingsService.listFeeSchedule(data.fee_type || '');
       case 'fees.setSchedule':    return SettingsService.setFeeSchedule(data);
       case 'fees.deleteSchedule': return SettingsService.deleteFeeSchedule(data.schedule_id);
